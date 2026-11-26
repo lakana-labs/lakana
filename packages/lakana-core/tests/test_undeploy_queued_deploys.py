@@ -9,17 +9,21 @@ as asked). The two-session scenarios are shared with the Postgres module
 
 from __future__ import annotations
 
+import hashlib
 import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from core_test_helpers import _prepared_catalog
 from sqlalchemy import event, select, update
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import ClauseElement
 from test_projects_deploys import _claimed, _deployed, _manifest, _repo
 
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef
@@ -38,7 +42,7 @@ from lakana_core.models import (
     PrincipalType,
     Repository,
 )
-from lakana_core.projects.deploys import DeployService
+from lakana_core.projects.deploys import DEPLOY_QUEUE_LOCK_KEY, DeployService
 from lakana_core.projects.diff import DeployDiff
 
 _JOIN_SECONDS = 60.0
@@ -573,3 +577,48 @@ def test_on_sqlite_a_pointer_removed_meanwhile_is_not_found(
 ) -> None:
     """404."""
     a_pointer_removed_meanwhile_is_not_found(sqlite_file, tmp_path / "store", monkeypatch)
+
+
+def test_the_deploy_queue_lock_is_a_two_key_postgres_advisory_lock() -> None:
+    """On PostgreSQL the lock is `pg_advisory_xact_lock(<key>::integer, <32 bits>::integer)`.
+
+    Its behaviour under contention is pinned by the Postgres module; here only the statement and
+    its keys are checked, on a stub session.
+    """
+    statements: list[str] = []
+
+    class StubSession:
+        """Reports a PostgreSQL bind and records what it is asked to run."""
+
+        def get_bind(self) -> SimpleNamespace:
+            """Return a bind that looks like PostgreSQL.
+
+            Returns
+            -------
+            SimpleNamespace
+                An object with ``dialect.name``.
+            """
+            return SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+        def execute(self, statement: ClauseElement) -> None:
+            """Record the compiled statement.
+
+            Parameters
+            ----------
+            statement
+                The statement.
+            """
+            compiled = statement.compile(
+                dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+            )
+            statements.append(str(compiled))
+
+    environment_id, repository_id = uuid.UUID(int=7), uuid.UUID(int=9)
+    service = DeployService(StubSession(), AllowAllAuthorization())  # ty: ignore[invalid-argument-type]
+    service._lock_deploy_queue(environment_id, repository_id)
+    digest = hashlib.blake2b(environment_id.bytes + repository_id.bytes, digest_size=4).digest()
+    second = int.from_bytes(digest, "big", signed=True)
+    assert statements == [
+        f"SELECT pg_advisory_xact_lock(CAST({DEPLOY_QUEUE_LOCK_KEY} AS INTEGER), "
+        f"CAST({second} AS INTEGER)) AS pg_advisory_xact_lock_1"
+    ]
