@@ -580,8 +580,20 @@ limit: keep inputs narrow. Polars 1 does not spill in this way and ignores the s
 lakana undeploy analytics --env dev --yes
 ```
 
-Removes the deployment pointer and the identity its runs use (needs `DEPLOY`); refused while a run
-of the repository is queued or running there. Data is untouched: the repository's tables become
+Removes the deployment pointer and the identity its runs use (needs `DEPLOY`). It is refused (409)
+while a run of the repository is queued or running there, and while a deploy or rollback of it is
+queued or running there: the message names that deploy (`Deploy 7c1f… of 'analytics' is queued in
+'dev'; wait for it to finish before undeploying.`). Follow it with `lakana deploys show ID --env
+dev` and undeploy once it has finished. A dry run does not hold it. A deploy you ask for after the
+undeploy deploys the repository again, without the identity the undeploy removed: bind it again
+with `lakana deployments set-run-as` before its runs need it.
+
+Through the API, `DELETE /api/v1/environments/{env}/deployments/{repo}` takes an optional
+`expected_project_version_id`, the `project_version_id` you read from the deployment: when the
+deployment points at another project version by then, the undeploy is refused with 409 and nothing
+changes (the SDK: `client.deployments.undeploy(env, repo, expected_project_version_id=...)`).
+
+Data is untouched: the repository's tables become
 orphans (`lakana orphans`), and its project versions stay as history. Their `health:` effects go:
 every [health signal](../reference/table-health.md) of an orphan warns. Only now can they be
 dropped: while a deployment builds a table, `lakana table delete` refuses it.

@@ -245,6 +245,18 @@ newest failure's. A client that handles every kind must accept `deploy_failed`. 
 newest five rows and **Show all N** for the rest, in place. The route serves the web interface;
 programs read the same facts from `GET /api/v1/runs/failed` and the deploys lists.
 
+### An undeploy waits for a queued deploy or rollback
+
+`lakana undeploy` (`DELETE /api/v1/environments/{env}/deployments/{repo}`) is now refused with 409
+while a deploy or rollback of the repository is queued or running in that environment, as it
+already was for a run. Before, the undeploy went through, and the queued deploy then deployed the
+repository again without the identity its runs use. The message names the deploy (`Deploy ID of
+'analytics' is queued in 'dev'; wait for it to finish before undeploying.`): a script that
+undeploys right after queueing a deploy must wait for that deploy first. A dry run does not hold
+an undeploy. The DELETE also takes an optional `expected_project_version_id` and refuses (409)
+when the deployment points at another project version; a client that does not send it works as
+before ([Undeploy](../how-to/projects.md#undeploy)).
+
 ### A deploy names its commit's subject
 
 Each deploy has a new field, `commit_subject`: the first line of the commit's message, cut to

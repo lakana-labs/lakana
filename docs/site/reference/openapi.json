@@ -18517,7 +18517,7 @@
           "deploys"
         ],
         "summary": "Remove a deployment",
-        "description": "Removes the repository's deployment and its binding in the environment; the tables and data stay. Needs `DEPLOY` on the environment; a CI token is always refused. Answers 404 when the environment, repository or deployment does not exist and 409 while a run of the repository is queued or running.",
+        "description": "Removes the repository's deployment and its binding in the environment; the tables and data stay. Needs `DEPLOY` on the environment; a CI token is always refused. Answers 404 when the environment, repository or deployment does not exist, and 409 while a run, or a deploy or rollback, of the repository is queued or running there, and when the deployment is not at `expected_project_version_id` (optional: the project version the caller saw).",
         "operationId": "undeploy_api_v1_environments__env__deployments__repo__delete",
         "parameters": [
           {
@@ -18539,6 +18539,24 @@
               "title": "Repo"
             },
             "description": "Repository name."
+          },
+          {
+            "name": "expected_project_version_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expected Project Version Id"
+            },
+            "description": "The project version the caller saw as current; omitted, whatever is current goes."
           },
           {
             "name": "authorization",

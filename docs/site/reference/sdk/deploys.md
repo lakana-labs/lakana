@@ -203,7 +203,7 @@ Returns: `Deployment`. The deployment without a binding.
 
 ### `client.deployments.undeploy`
 
-Signature: `client.deployments.undeploy(environment: str, repository: str) -> None`
+Signature: `client.deployments.undeploy(environment: str, repository: str, *, expected_project_version_id: str | None = None) -> None`
 
 Remove a repository's deployment; data stays (needs `DEPLOY`).
 
@@ -211,10 +211,11 @@ Remove a repository's deployment; data stays (needs `DEPLOY`).
 |---|---|---|---|
 | `environment` | `str` | required | Environment name. |
 | `repository` | `str` | required | Repository name. |
+| `expected_project_version_id` | `str | None` | `None` | The project version you saw as current (`Deployment.project_version_id`); the undeploy is then refused if the deployment points at another one. `None` undeploys whatever is current. |
 
 | Error | When |
 |---|---|
-| `lakana.Conflict` | While a run of the repository is active there. |
+| `lakana.Conflict` | While a run, or a deploy or rollback, of the repository is queued or running there, or when the deployment is not at `expected_project_version_id`. |
 
 ## `client.project_versions`
 

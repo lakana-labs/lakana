@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 import difflib
 import functools
+import hashlib
 import re
 import time
 import uuid
@@ -19,7 +20,21 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import Select, String, and_, delete, func, insert, or_, select, type_coerce, update
+from sqlalchemy import (
+    Integer,
+    Select,
+    String,
+    and_,
+    delete,
+    func,
+    insert,
+    literal,
+    or_,
+    select,
+    type_coerce,
+    update,
+)
+from sqlalchemy import cast as sql_cast
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -165,6 +180,26 @@ from lakana_core.secrets.uses import SecretUse, bind_command, describe_use
 CONFLICT_MESSAGE = "Another deploy or rollback moved this environment's deployment first; retry."
 
 _GONE_MESSAGE = "The repository or environment of this deploy no longer exists."
+
+DEPLOY_QUEUE_LOCK_KEY = 0x6C6B6471  # "lkdq"; the second key: 32 bits of environment and repository
+"""The first of the two keys of the lock a submit and an undeploy of one deployment share (#838)."""
+
+UNDEPLOY_HELD_MESSAGE = (
+    "{kind} {id} of {repository!r} is {status} in {environment!r}; wait for it to finish before "
+    "undeploying."
+)
+"""Why an undeploy is refused: a deploy or rollback of the repository is queued or running there."""
+
+UNDEPLOY_CHANGED_MESSAGE = (
+    "The deployment of {repository!r} in {environment!r} changed since you read it: it is no "
+    "longer project version {expected}. Look at it again before undeploying."
+)
+"""Why an undeploy that names the version its caller saw is refused: the pointer is elsewhere."""
+
+_UNDEPLOY_MOVED_MESSAGE = (
+    "The deployment of {repository!r} in {environment!r} changed meanwhile; look at it again and "
+    "retry."
+)
 
 DEPLOY_ENDED_MESSAGE = (
     "Deploy run {id} is no longer this worker's running run, so nothing was changed."
@@ -1855,6 +1890,45 @@ class DeployService:
         key = int.from_bytes(environment_id.bytes[:8], "big", signed=True)
         self._session.execute(select(func.pg_advisory_xact_lock(key)))
 
+    def _lock_deploy_queue(self, environment_id: uuid.UUID, repository_id: uuid.UUID) -> None:
+        """Make a submit and an undeploy of one deployment take turns until the transaction ends.
+
+        An undeploy refuses while a deploy or rollback of the repository is queued or running
+        there (#838), but under READ COMMITTED its check does not see a run queued by a
+        transaction that has not committed yet; both would commit, and the queued deploy would
+        deploy the repository again behind the undeploy's back. A submit of a deploy or rollback
+        and an undeploy therefore take this lock before anything else they lock: the later one
+        waits for the earlier one's commit, so an undeploy either sees the queued run (and is
+        refused) or commits first (and the deploy is one asked for after it). The deployment's
+        pointer row cannot serve: before a first deploy there is none to lock.
+
+        A PostgreSQL transaction-scoped advisory lock with two integer keys,
+        `DEPLOY_QUEUE_LOCK_KEY` and 32 bits of a digest of the environment's and the
+        repository's ids (cast to `integer`, the form of `runs.pools.lock_principal`); two
+        deployments whose bits collide only wait for each other. Nothing else takes it, and it
+        comes first, so it cannot close a cycle. On SQLite nothing is taken: the submit's insert
+        and the undeploy's delete each take the one writer lock, which orders them the same way.
+
+        Parameters
+        ----------
+        environment_id
+            The environment.
+        repository_id
+            The repository.
+        """
+        if self._session.get_bind().dialect.name != "postgresql":
+            return
+        digest = hashlib.blake2b(environment_id.bytes + repository_id.bytes, digest_size=4)
+        key = int.from_bytes(digest.digest(), "big", signed=True)
+        self._session.execute(
+            select(
+                func.pg_advisory_xact_lock(
+                    sql_cast(literal(DEPLOY_QUEUE_LOCK_KEY), Integer),
+                    sql_cast(literal(key), Integer),
+                )
+            )
+        )
+
     def _claim_tables(
         self,
         environment_id: uuid.UUID,
@@ -2133,6 +2207,10 @@ class DeployService:
     ) -> DeployRunView:
         """Queue a deploy, dry run or rollback.
 
+        A deploy or rollback is queued under the lock an undeploy of the same deployment takes
+        (`_lock_deploy_queue`), so the two take turns: an undeploy either sees this run and is
+        refused, or committed before it.
+
         Parameters
         ----------
         p
@@ -2218,6 +2296,8 @@ class DeployService:
                 raise ValidationError("to_sha and to_previous are only for a rollback.")
             if ref is not None:
                 requested = validate_ref(ref)
+        if kind is not DeployKind.DRY_RUN:
+            self._lock_deploy_queue(env.id, repo.id)
         run = DeployRun(
             id=uuid.uuid4(),
             environment_id=env.id,
@@ -2894,7 +2974,14 @@ class DeployService:
                 "The deployment changed (redeployed, rolled back or undeployed) meanwhile; retry."
             )
 
-    def undeploy(self, p: PrincipalRef, environment: str, repository: str) -> None:
+    def undeploy(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        repository: str,
+        *,
+        expected_project_version_id: uuid.UUID | None = None,
+    ) -> None:
         """Remove a repository's deployment pointer and run principal binding.
 
         Data and project versions stay: the repository's tables become orphans and
@@ -2904,6 +2991,13 @@ class DeployService:
         transaction, so a run start racing this call either commits first (and this call is
         refused) or finds the pointer gone (`lock_deployment`).
 
+        A deploy or rollback of the repository that is queued or running there refuses it too
+        (#838): it would otherwise deploy the repository again afterwards, without the binding
+        removed here. The lock of `_lock_deploy_queue` is taken first, before the pointer, so a
+        deploy queued at the same moment is either seen here or queued after this commit; a
+        deploy asked for after an undeploy deploys again, as asked. A dry run moves nothing and
+        does not refuse it.
+
         Parameters
         ----------
         p
@@ -2912,6 +3006,9 @@ class DeployService:
             Environment name.
         repository
             Repository name.
+        expected_project_version_id
+            The project version the caller saw as current; when given, the undeploy is refused
+            if the deployment points at another one. `None` undeploys whatever is current.
 
         Raises
         ------
@@ -2921,24 +3018,40 @@ class DeployService:
         NotFoundError
             If the environment, repository or deployment does not exist.
         ConflictError
-            While a run of the repository is queued or running there.
+            While a run, or a deploy or rollback, of the repository is queued or running there;
+            when the deployment is not at `expected_project_version_id`; when it moved between
+            this call's read and its delete.
         """
         refuse_ci_token(self._authz, p, environment, "undeploy a repository")
         self._authz.authorize(p, Action.DEPLOY, Securable.environment_scope(environment))
         env, repo = self._environment(environment), self._repository(repository)
+        self._lock_deploy_queue(env.id, repo.id)
         row = self._deployment_row(env, repo)
         version_id = row.current_job_version_id
+        if expected_project_version_id is not None and version_id != expected_project_version_id:
+            self._session.rollback()
+            raise ConflictError(
+                UNDEPLOY_CHANGED_MESSAGE.format(
+                    repository=repository,
+                    environment=environment,
+                    expected=expected_project_version_id,
+                )
+            )
         result = self._session.execute(
             delete(EnvironmentDeployment)
             .where(
                 EnvironmentDeployment.environment_id == env.id,
                 EnvironmentDeployment.repository_id == repo.id,
+                EnvironmentDeployment.current_job_version_id == version_id,
             )
             .execution_options(synchronize_session=False)
         )
         if cast("CursorResult[Any]", result).rowcount != 1:
             self._session.rollback()
-            raise NotFoundError(f"Repository {repository!r} is not deployed in {environment!r}.")
+            self._deployment_row(env, repo)
+            raise ConflictError(
+                _UNDEPLOY_MOVED_MESSAGE.format(repository=repository, environment=environment)
+            )
         active = self._session.execute(
             select(Run.id).where(
                 Run.environment_id == env.id,
@@ -2951,6 +3064,28 @@ class DeployService:
             raise ConflictError(
                 f"Run {active} of {repository!r} is active in {environment!r}; cancel it or "
                 "wait for it to finish before undeploying."
+            )
+        pending = self._session.execute(
+            select(DeployRun.id, DeployRun.kind, DeployRun.status)
+            .where(
+                DeployRun.environment_id == env.id,
+                DeployRun.repository_id == repo.id,
+                DeployRun.kind.in_((DeployKind.DEPLOY, DeployKind.ROLLBACK)),
+                DeployRun.status.in_((DeployStatus.QUEUED, DeployStatus.RUNNING)),
+            )
+            .order_by(DeployRun.created_at, DeployRun.id)
+            .limit(1)
+        ).one_or_none()
+        if pending is not None:
+            self._session.rollback()
+            raise ConflictError(
+                UNDEPLOY_HELD_MESSAGE.format(
+                    kind="Rollback" if pending.kind is DeployKind.ROLLBACK else "Deploy",
+                    id=pending.id,
+                    repository=repository,
+                    status=pending.status.value,
+                    environment=environment,
+                )
             )
         # Nothing cascades from the pointer row, so the schedules of the deployment go here.
         for waiting in self._session.scalars(
