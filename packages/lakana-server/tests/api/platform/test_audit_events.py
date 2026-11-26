@@ -545,3 +545,34 @@ def test_the_type_filter_offers_every_known_type_and_never_unknown(
     offered = schema["components"]["schemas"][choice["$ref"].rpartition("/")[2]]["enum"]
 
     assert set(offered) == {t.value for t in AuditEventType} - {"UNKNOWN"}
+
+
+def test_each_event_names_its_principal_and_the_name_filters(client: TestClient) -> None:
+    """The interface shows who and filters by name, as people know each other (#827)."""
+    _bobs_query(client)
+
+    every = client.get("/api/v1/audit-events", headers=AUTH_HEADER)
+    by_name = client.get(
+        "/api/v1/audit-events", headers=AUTH_HEADER, params={"principal_name": "bob"}
+    )
+
+    assert every.status_code == 200, every.text
+    named = {(e["event_type"], e["principal_name"]) for e in every.json()["items"]}
+    assert ("QUERY_COMPLETED", "bob") in named
+    assert by_name.status_code == 200, by_name.text
+    assert {e["principal_name"] for e in by_name.json()["items"]} == {"bob"}
+
+
+def test_a_filter_by_both_an_id_and_a_name_is_refused(client: TestClient) -> None:
+    _bobs_query(client)
+    with Session(client.app.state.engine) as session:
+        bob = session.scalars(select(Principal.id).where(Principal.name == "bob")).one()
+
+    response = client.get(
+        "/api/v1/audit-events",
+        headers=AUTH_HEADER,
+        params={"principal_name": "bob", "principal_id": str(bob)},
+    )
+
+    assert response.status_code == 422, response.text
+    assert "not both" in response.json()["detail"]

@@ -34,7 +34,7 @@
     },
     "settings": {
       "name": "Settings",
-      "purpose": "Status, environments, repositories, access, sign-in and configuration for the whole instance."
+      "purpose": "Status, environments, repositories, access, sign-in, configuration and the audit log for the whole instance."
     }
   },
   "comingSoon": {
@@ -801,7 +801,7 @@
         "guide": "What the Connections screen shows"
       },
       "settings": {
-        "text": "The instance’s status and what you may do. For those who manage them, also environments, repositories, access, sign-in and configuration.",
+        "text": "The instance’s status and what you may do. For those who manage them, also environments, repositories, access, sign-in, configuration and the audit log.",
         "guide": "What the status tells you, and who sees what"
       },
       "search": {
