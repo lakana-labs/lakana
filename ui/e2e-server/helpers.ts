@@ -1248,6 +1248,40 @@ export function createRepository(request: APIRequestContext, body: object): Prom
   return create(request, "/api/v1/repositories", body);
 }
 
+/**
+ * Starts a job's run as the bootstrap administrator; with no worker it stays queued.
+ *
+ * @param request - The request context.
+ * @param environment - The environment.
+ * @param repository - The repository the job is in.
+ * @param job - The job's name.
+ * @returns Resolves once the server queued the run.
+ */
+export function startJobRun(
+  request: APIRequestContext,
+  environment: string,
+  repository: string,
+  job: string,
+): Promise<void> {
+  return create(request, `/api/v1/environments/${environment}/jobs/${job}/runs`, { repository });
+}
+
+/**
+ * The names of the jobs an environment has, as the bootstrap administrator reads them.
+ *
+ * @param request - The request context.
+ * @param environment - The environment.
+ * @returns The names.
+ */
+export async function jobNames(request: APIRequestContext, environment: string): Promise<string[]> {
+  const path = `/api/v1/environments/${environment}/jobs`;
+  const response = await request.get(path, {
+    headers: { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` },
+  });
+  await ensureOk(`GET ${path}`, response);
+  return ((await response.json()) as { name: string }[]).map((job) => job.name);
+}
+
 /** One audit event, as much of it as the tests read. */
 export interface AuditEventRead {
   /** Its type. */

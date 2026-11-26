@@ -19,6 +19,7 @@ import {
   rollBack,
   showCheckRows,
   startJob,
+  undeploy,
 } from "./jobs";
 import type { TaskAttemptOut, TriggerOut, WaitingOut } from "./jobs";
 
@@ -421,5 +422,17 @@ describe("the deploy calls", () => {
       kind: "rollback",
       to_sha: "4f9d2a7c",
     });
+  });
+
+  it("undeploys a repository from an environment, the names in the path encoded", async () => {
+    const server = fakeServer({
+      "DELETE /api/v1/environments/a b/deployments/sales ops": { status: 204 },
+    });
+
+    await undeploy("a b", "sales ops");
+
+    expect(server.sent.map((each) => [each.method, each.path, each.body])).toEqual([
+      ["DELETE", "/api/v1/environments/a%20b/deployments/sales%20ops", undefined],
+    ]);
   });
 });

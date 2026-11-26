@@ -267,7 +267,7 @@ export function aDeploy(over: Partial<DeployOut> = {}): DeployOut {
     finished_at: "2026-11-16T09:00:40Z",
     submitted_by: "ana.nowak",
     jobs: null,
-    actions: ["rollback"],
+    actions: ["rollback", "undeploy"],
     ...over,
   };
 }

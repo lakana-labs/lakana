@@ -42,6 +42,7 @@ import {
   MISSING_ID,
   MISSING_SENTENCE,
   OLDER_ONLY_JOB,
+  RUN_AS,
   SECRET,
   SELECTION_PATTERNS,
   stubJobs,
@@ -1072,6 +1073,18 @@ walk(
     await expect(dialog).toBeHidden();
     await expect(page.getByText(/^Rolled back /)).toBeVisible({ timeout: 10_000 });
     await expectMarked(page, "the note after a rollback", ["analytics"]);
+
+    // The undeploy's question names the jobs and the run principal; its note the repository.
+    await page.getByRole("button", { name: /^Undeploy… \(analytics/ }).click();
+    const undeploy = page.getByRole("dialog");
+    await expect(undeploy.getByRole("list", { name: "What the undeploy removes" })).toBeVisible();
+    await expectMarked(page, "the undeploy dialog", ["analytics", "daily_sales", RUN_AS, "prod"]);
+    // A name that holds a hidden character is typed as its label shows it.
+    await undeploy.getByRole("textbox").fill("analyticsU+202E");
+    await undeploy.getByRole("button", { name: "Undeploy" }).click();
+    await expect(undeploy).toBeHidden();
+    await expect(page.getByText(/^Undeployed /)).toBeVisible();
+    await expectMarked(page, "the note after an undeploy", ["analytics", "prod"]);
     expectOnlyStubbed(paths, JOBS_STUBBED);
   },
 );

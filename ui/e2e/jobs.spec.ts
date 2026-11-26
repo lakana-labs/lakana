@@ -18,6 +18,7 @@ import {
   REPOSITORY,
   RESUMED_ID,
   ROWS_QUERY_ID,
+  RUN_AS,
   RUNNING_ID,
   SECRET,
   SELECTION_PATTERNS,
@@ -44,6 +45,15 @@ const DEPLOYS_TAB = `/jobs/deploys?environment=${ENV}`;
 
 /** The older deploy's Roll back to this…, by its accessible name. */
 const ROLL_BACK = `Roll back to this… (${REPOSITORY} at 4f9d2a7)`;
+
+/** The current deploy's Undeploy…, by its accessible name. */
+const UNDEPLOY = `Undeploy… (${REPOSITORY} from ${ENV})`;
+
+/** The undeploy's question, by its name. */
+const UNDEPLOY_DIALOG = `Undeploy ${REPOSITORY} from ${ENV}?`;
+
+/** The note after the undeploy. */
+const UNDEPLOYED = `Undeployed ${REPOSITORY} from ${ENV}. Its tables stay, as orphans.`;
 
 /** The job's page. */
 const JOB_PAGE = `/jobs/${ENV}/job/${REPOSITORY}/${JOB}`;
@@ -718,6 +728,81 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.getByRole("button", { name: ROLL_BACK })).toHaveCount(0);
     });
 
+    test("an undeploy names what goes, waits for the name, and its note takes the focus", async ({
+      page,
+    }) => {
+      await stubWaitingJob(page);
+      const sent: string[] = [];
+      page.on("request", (request) => {
+        if (request.method() === "DELETE") {
+          sent.push(new URL(request.url()).pathname);
+        }
+      });
+      await openDeploys(page);
+      const rows = page.getByRole("region", { name: `Deploys of ${ENV}` }).getByRole("row");
+      // Only the current deploy offers it.
+      await expect(page.getByRole("button", { name: /^Undeploy… / })).toHaveCount(1);
+      await expect(rows.nth(2).getByRole("button", { name: UNDEPLOY })).toBeVisible();
+
+      await page.getByRole("button", { name: UNDEPLOY }).click();
+      const dialog = page.getByRole("dialog", { name: UNDEPLOY_DIALOG });
+      await expect(dialog).toContainText(`${ENV} is protected.`);
+      await expect(
+        dialog.getByRole("list", { name: "What the undeploy removes" }).getByRole("listitem"),
+      ).toHaveText([
+        `${JOB}: removed, with its schedule`,
+        `${WAITING_JOB}: removed, with its schedule; its waiting start is dropped`,
+        `The service account its runs write as, ${RUN_AS}: no longer bound`,
+        `Its glossary terms in ${ENV}`,
+        "The health effects of its tables: every health signal of these tables warns",
+      ]);
+      const confirm = dialog.getByRole("button", { name: "Undeploy" });
+      await expect(confirm).toBeDisabled();
+      expect(await violations(page), "the undeploy dialog").toEqual([]);
+
+      await dialog.getByRole("textbox", { name: `Type ${REPOSITORY} to confirm` }).fill(REPOSITORY);
+      await confirm.click();
+      await expect(dialog).toBeHidden();
+      const note = page.getByText(UNDEPLOYED);
+      await expect(note).toBeVisible();
+      await expect(page.locator(".jobs-rollback-note")).toBeFocused();
+      expect(sent).toEqual([`/api/v1/environments/${ENV}/deployments/${REPOSITORY}`]);
+      // Nothing is current any more, so nothing is offered: no rollback, no undeploy.
+      await expect(rows).toHaveCount(6);
+      await expect(page.getByRole("region", { name: `Deploys of ${ENV}` })).not.toContainText(
+        "current",
+      );
+      await expect(
+        page.getByRole("button", { name: /^Roll back to this…|^Undeploy…/ }),
+      ).toHaveCount(0);
+      expect(await violations(page), "the Deploys tab after an undeploy").toEqual([]);
+    });
+
+    test("an undeploy works by keyboard alone, and Escape closes its question", async ({
+      page,
+    }) => {
+      await openDeploys(page);
+      const undeploy = page.getByRole("button", { name: UNDEPLOY });
+      await tabOnto(undeploy);
+      await page.keyboard.press("Enter");
+      const dialog = page.getByRole("dialog", { name: UNDEPLOY_DIALOG });
+      const field = dialog.getByRole("textbox", { name: `Type ${REPOSITORY} to confirm` });
+      await expect(field).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeHidden();
+      await expect(undeploy).toBeFocused();
+
+      await page.keyboard.press("Enter");
+      await expect(field).toBeVisible();
+      await tabOnto(field);
+      await page.keyboard.type(REPOSITORY);
+      await page.keyboard.press("Enter");
+      await expect(dialog).toBeHidden();
+      await expect(page.getByText(UNDEPLOYED)).toBeVisible();
+      await expect(page.locator(".jobs-rollback-note")).toBeFocused();
+      expect(await focusOnPage(page)).toBe(true);
+    });
+
     test("Back and Forward keep each tab's filters; a job links to its deploys", async ({
       page,
     }) => {
@@ -908,6 +993,14 @@ for (const theme of ["light", "dark"] as const) {
       ).toBeVisible();
       expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(0);
       expect(await violations(page), "the rollback dialog at 320 px").toEqual([]);
+      await page.keyboard.press("Escape");
+
+      await page.getByRole("button", { name: UNDEPLOY }).click();
+      await expect(
+        page.getByRole("dialog").getByRole("textbox", { name: `Type ${REPOSITORY} to confirm` }),
+      ).toBeVisible();
+      expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(0);
+      expect(await violations(page), "the undeploy dialog at 320 px").toEqual([]);
     });
 
     test("no read while the tab is hidden, on the Runs tab and of a rollback", async ({ page }) => {
@@ -964,6 +1057,10 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.getByText(`Rolled back ${REPOSITORY} in ${ENV} to 4f9d2a7.`)).toBeVisible({
         timeout: 10_000,
       });
+      await page.getByRole("button", { name: /^Undeploy… / }).click();
+      await page.getByRole("dialog").getByRole("textbox").fill(REPOSITORY);
+      await page.getByRole("dialog").getByRole("button", { name: "Undeploy" }).click();
+      await expect(page.getByText(UNDEPLOYED)).toBeVisible();
 
       const api = requests.filter((path) => path.startsWith("/api/"));
       expect(api).toContain(`/api/v1/environments/${ENV}/deployments`);

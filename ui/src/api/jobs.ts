@@ -684,8 +684,11 @@ export interface DeployOut {
   readonly submitted_by: string | null;
   /** The jobs its version defines; only when one deploy is read, null in a list. */
   readonly jobs: readonly string[] | null;
-  /** What the reader's rights allow on it. */
-  readonly actions: readonly "rollback"[];
+  /**
+   * What the reader's rights allow on it: `rollback` to its commit, `undeploy` its repository
+   * from the environment.
+   */
+  readonly actions: readonly ("rollback" | "undeploy")[];
 }
 
 /** The current version of one repository in an environment. */
@@ -790,4 +793,22 @@ export function rollBack(
     kind: "rollback",
     to_sha: sha,
   });
+}
+
+/**
+ * Undeploys a repository from an environment: its jobs, their schedules and a waiting start go,
+ * and so do its run principal, its glossary terms and its tables' health effects there; the
+ * tables and their data stay, as orphans.
+ *
+ * @param environment - The environment.
+ * @param repository - The repository.
+ * @returns Nothing.
+ * @throws {ApiError} for a refusal; 403 without `DEPLOY` or for a CI token, 404 for a repository
+ *   not deployed there, 409 while a run of it is queued or running there.
+ */
+export async function undeploy(environment: string, repository: string): Promise<void> {
+  await api.request<undefined>(
+    "DELETE",
+    environmentPath(environment, `/deployments/${encodeURIComponent(repository)}`),
+  );
 }

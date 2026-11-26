@@ -13,7 +13,14 @@ import { PROD_RULE, stubCiTrust } from "../ciTrust";
 import { stubConnect } from "../connect";
 import { stubConnections } from "../connections";
 import { stubEnvironments } from "../environments";
-import { FAILED_ID, keepRollbackRunning, MISSING_ID, stubJobs, TIMED_OUT } from "../jobs";
+import {
+  FAILED_ID,
+  keepRollbackRunning,
+  MISSING_ID,
+  stubJobs,
+  stubWaitingJob,
+  TIMED_OUT,
+} from "../jobs";
 import { stubManagement } from "../manage";
 import { stubPlaces } from "../places";
 import { SALES_SQL, stubQueries, WEEKLY } from "../queries";
@@ -657,6 +664,36 @@ export const SHOTS: readonly Shot[] = [
       await ask.getByRole("button", { name: "Roll back", exact: true }).focus();
       await page.keyboard.press("Enter");
       await expect(page.getByText(/^Rolling back analytics in prod to /)).toBeVisible();
+    },
+  },
+  {
+    // The undeploy's question: what goes and what stays, Undeploy held until the name is typed.
+    name: "jobs-undeploy",
+    stub: async (page) => {
+      await stubJobs(page);
+      await stubWaitingJob(page);
+    },
+    path: "/jobs/deploys?environment=prod",
+    ready: text("ana.nowak"),
+    act: async (page) => {
+      await page.getByRole("button", { name: /^Undeploy… \(analytics/ }).click();
+      await expect(page.getByRole("dialog").getByText(/^hourly_stock: removed/)).toBeVisible();
+    },
+  },
+  {
+    // After the undeploy: nothing current, nothing offered, the note focused by keyboard.
+    name: "jobs-undeployed",
+    stub: stubJobs,
+    path: "/jobs/deploys?environment=prod",
+    ready: text("ana.nowak"),
+    act: async (page) => {
+      await page.getByRole("button", { name: /^Undeploy… \(analytics/ }).focus();
+      await page.keyboard.press("Enter");
+      const ask = page.getByRole("dialog");
+      await ask.getByRole("textbox").fill("analytics");
+      await ask.getByRole("textbox").press("Enter");
+      await expect(page.getByText(/^Undeployed analytics from prod\./)).toBeVisible();
+      await expect(page.locator(".jobs-rollback-note")).toBeFocused();
     },
   },
 

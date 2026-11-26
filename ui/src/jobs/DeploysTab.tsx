@@ -1,13 +1,14 @@
 /**
  * The Deploys tab of the Jobs area: one environment's deploys, each repository's current version
- * marked, with Roll back to this… beside every earlier successful one.
+ * marked, with Roll back to this… beside every earlier successful one and Undeploy… beside the
+ * current one.
  *
  * @packageDocumentation
  */
 import { type JSX, lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { type DeployOut, listDeployments, listDeploys } from "../api/jobs";
+import { type DeploymentOut, type DeployOut, listDeployments, listDeploys } from "../api/jobs";
 import { ReadFailed } from "../catalog/ReadFailed";
 import { useCursorPages } from "../catalog/views/useCursorPages";
 import { ViewList } from "../catalog/views/ViewList";
@@ -32,6 +33,11 @@ const RollbackDialog = lazy(() =>
   import("./RollbackDialog").then((m) => ({ default: m.RollbackDialog })),
 );
 
+// The undeploy's question likewise, read when Undeploy… is first pressed.
+const UndeployDialog = lazy(() =>
+  import("./UndeployDialog").then((m) => ({ default: m.UndeployDialog })),
+);
+
 /** A rollback the server accepted, which the note follows. */
 interface Rolled {
   /** The rollback's id. */
@@ -40,6 +46,20 @@ interface Rolled {
   readonly repository: string;
   /** The commit, as the list writes it. */
   readonly commit: string;
+}
+
+/** The repositories undeployed since the current versions were last read. */
+interface Undeployed {
+  /** The repositories, in the order they were undeployed. */
+  readonly repositories: readonly string[];
+  /** The current versions as read before them, so the list knows when they were read again. */
+  readonly before: readonly DeploymentOut[] | undefined;
+}
+
+/** An undeploy the note says was done; a new object for each, so the note takes the focus. */
+interface UndeployNote {
+  /** The repository. */
+  readonly repository: string;
 }
 
 /** The Repository menu's choice of every repository; a repository's choice is `repo:` and its name. */
@@ -74,9 +94,13 @@ interface DeploysOfProps {
  * whose deploys were listed, in the address as `?repository=`), the line that says why its current versions could not be
  * read, and the deploys, 50 a page with Show more. They are not read again on their own: a
  * deploy is the person's own act, and the list and the current versions are read again once a
- * rollback the person asked for ended. Roll back to this… opens the rollback's question; once
- * the server accepted the rollback, the focus is back on the row's button and the note under the
- * list follows it. A row that leaves the list with the focus in it hands the focus to the note.
+ * rollback the person asked for ended, or once an undeploy was carried out. Roll back to this…
+ * opens the rollback's question; once the server accepted the rollback, the focus is back on the
+ * row's button and the note under the list follows it. Undeploy…, beside the current deploy,
+ * opens the undeploy's question; once the server undeployed the repository, the note says so and
+ * takes the focus, nothing of that repository is offered any more, and every row's button waits
+ * (pointing at the note) until the current versions were read again. A row that leaves the list
+ * with the focus in it hands the focus to the note.
  *
  * @param props - The environment and its protection.
  * @param props.environment - The environment.
@@ -101,11 +125,17 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
     JSON.stringify(sort),
     deployId,
   );
+  const [undeploying, setUndeploying] = useState<DeploymentOut | null>(null);
+  const [undeployed, setUndeployed] = useState<Undeployed | null>(null);
+  const [undeployNote, setUndeployNote] = useState<UndeployNote | null>(null);
+  // The current versions from before the undeploys: they still name those repositories, which
+  // are gone, until they are read again successfully (a failed read keeps the old ones).
+  const stale = undeployed !== null && deployments.data === undeployed.before;
+  const gone: readonly string[] = stale ? undeployed.repositories : [];
   const current = new Map(
-    (deployments.data ?? []).map((deployment) => [
-      deployment.repository,
-      deployment.project_version_id,
-    ]),
+    (deployments.data ?? [])
+      .filter((deployment) => !gone.includes(deployment.repository))
+      .map((deployment) => [deployment.repository, deployment.project_version_id]),
   );
   // The repositories of the deploys read so far: the menu keeps offering them while the list
   // shows one repository's deploys. The server lists no repository's deploy history of its own,
@@ -133,6 +163,9 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
   const [endedId, setEndedId] = useState<string | null>(null);
   const noteId = useId();
   const following = rolled !== null && endedId !== rolled.id;
+  // While a rollback is followed or the current versions are read again after an undeploy, no
+  // row starts anything: the versions it would act on are not known yet.
+  const holding = following || (stale && deployments.busy);
   const area = useRef<HTMLDivElement>(null);
   const note = useRef<HTMLDivElement>(null);
   // The element of the list that last had the focus.
@@ -156,6 +189,12 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
       note.current?.focus();
     }
   }, [pages.items, deployments.data]);
+  // The undeploy's note takes the focus at once: the row's Undeploy… left with the dialog.
+  useEffect(() => {
+    if (undeployNote !== null) {
+      note.current?.focus();
+    }
+  }, [undeployNote]);
   const rows = pages.items ?? [];
   // Nothing is marked while a first page is on its way: after a new sort the rows of the old one
   // stay until it arrives. Show more keeps the mark (its rows only add older ones in the newest
@@ -231,24 +270,44 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
           </tr>
         }
       >
-        {rows.map((deploy) => (
-          <DeployRow
-            key={deploy.id}
-            deploy={deploy}
-            current={marked.has(deploy.id)}
-            onRollBack={
-              mayRollBackTo(deploy, current)
-                ? () => {
-                    setRolling(deploy);
-                  }
-                : null
-            }
-            heldBy={following ? noteId : null}
-          />
-        ))}
+        {rows.map((deploy) => {
+          const deployment = marked.has(deploy.id)
+            ? deployments.data?.find((one) => one.repository === deploy.repository)
+            : undefined;
+          return (
+            <DeployRow
+              key={deploy.id}
+              deploy={deploy}
+              current={marked.has(deploy.id)}
+              onRollBack={
+                mayRollBackTo(deploy, current)
+                  ? () => {
+                      setRolling(deploy);
+                    }
+                  : null
+              }
+              onUndeploy={
+                deployment !== undefined && deploy.actions.includes("undeploy")
+                  ? () => {
+                      setUndeploying(deployment);
+                    }
+                  : null
+              }
+              heldBy={holding ? noteId : null}
+            />
+          );
+        })}
       </ViewList>
       {/* The status region stays in place, so the note is announced when it arrives. */}
       <div className="jobs-rollback-note" id={noteId} role="status" tabIndex={-1} ref={note}>
+        {undeployNote !== null && (
+          <p>
+            {t("jobs.deploys.undeployNote", {
+              repository: undeployNote.repository,
+              environment,
+            })}
+          </p>
+        )}
         {rolled !== null && (
           <RollbackNote
             key={rolled.id}
@@ -270,6 +329,7 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
             deploy={rolling}
             protectedEnvironment={protectedEnvironment}
             onAccepted={(id) => {
+              setUndeployNote(null);
               setRolled({
                 id,
                 repository: rolling.repository,
@@ -279,6 +339,30 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
             }}
             onCancel={() => {
               setRolling(null);
+            }}
+          />
+        </Suspense>
+      )}
+      {undeploying !== null && (
+        <Suspense fallback={null}>
+          <UndeployDialog
+            environment={environment}
+            repository={undeploying.repository}
+            runAs={undeploying.run_as}
+            protectedEnvironment={protectedEnvironment}
+            onDone={() => {
+              const { repository } = undeploying;
+              setRolled(null);
+              setUndeployNote({ repository });
+              setUndeployed({
+                repositories: [...gone, repository],
+                before: deployments.data,
+              });
+              setUndeploying(null);
+              onEnded();
+            }}
+            onCancel={() => {
+              setUndeploying(null);
             }}
           />
         </Suspense>

@@ -257,7 +257,7 @@
   }
 "token list": { class: ui, part: 7, done: true }
 "token revoke": { class: ui, part: 7, done: true }
-"undeploy": { class: ui, part: 5 }
+"undeploy": { class: ui, part: 5, done: true }
 "whoami": { class: read, part: 1 }
 "worker list": { class: ui, part: 8, done: true }
 "DELETE /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7, done: true }
@@ -266,7 +266,7 @@
   { class: ui, part: 6, done: true }
 "DELETE /api/v1/environments/{environment_name}/secrets/{secret_name}":
   { class: ui, part: 7, done: true }
-"DELETE /api/v1/environments/{env}/deployments/{repo}": { class: ui, part: 5 }
+"DELETE /api/v1/environments/{env}/deployments/{repo}": { class: ui, part: 5, done: true }
 "DELETE /api/v1/environments/{env}/deployments/{repo}/run-as": { class: ui, part: 7, done: true }
 "DELETE /api/v1/environments/{env}/namespaces/{path}": { class: ui, part: 3, done: true }
 "DELETE /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}":
