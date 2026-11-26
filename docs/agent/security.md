@@ -6098,7 +6098,7 @@ already allows.
   commit in the same transaction.
 - **Each event names its principal, and the log filters by a name (#827).** `ShownAuditEvent`
   carries `principal_name`, read for the page's principal ids in one query (`None` for an event
-  attributed to nobody); `?principal=NAME` is the `principal_id` filter of that principal, so its
+  attributed to nobody); `?principal_name=NAME` is the `principal_id` filter of that principal, so its
   `ACTIVITY_VIEWED` targeting key is the same `{"principal_id": id}` (none for the reader's own
   name), a name nobody has matches no event and records nothing, and both filters at once are a
   422. A name tells a reader of the log nothing new: the details already name principals

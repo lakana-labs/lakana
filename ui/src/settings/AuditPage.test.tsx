@@ -166,7 +166,7 @@ describe("AuditPage", () => {
       expect(router.state.location.search).toBe("?who=maria");
     });
     await waitFor(() => {
-      expect(reads(server.sent).at(-1)?.get("principal")).toBe("maria");
+      expect(reads(server.sent).at(-1)?.get("principal_name")).toBe("maria");
     });
 
     const eventField = screen.getByRole("combobox", { name: "Event" });
@@ -275,7 +275,7 @@ describe("AuditPage", () => {
 
     expect(await screen.findByText("No event matches these filters.")).toBeInTheDocument();
     const [first] = reads(server.sent);
-    expect(first?.get("principal")).toBe("ben");
+    expect(first?.get("principal_name")).toBe("ben");
     expect(first?.get("event_type")).toBe("TABLE_WRITE");
     expect(first?.get("environment")).toBe("gone");
     expect(screen.getByRole("combobox", { name: "Who" })).toHaveValue("ben");
@@ -325,7 +325,7 @@ describe("AuditPage", () => {
     });
     const last = reads(server.sent).at(-1);
     expect(last?.get("cursor")).toBe("c2");
-    expect(last?.get("principal")).toBe("maria");
+    expect(last?.get("principal_name")).toBe("maria");
   });
 
   it("moves the focus to the list when a further page is empty, or its event has no control", async () => {

@@ -948,7 +948,7 @@ def test_a_filter_by_a_name_nobody_has_shows_nothing(session: Session) -> None:
 def test_a_filter_by_both_an_id_and_a_name_is_refused(session: Session) -> None:
     admin, bob = _person(session, "root"), _person(session, "bob")
     _grant(session, admin, role=Role.ADMIN)
-    with pytest.raises(ValidationError, match="principal_id or principal, not both"):
+    with pytest.raises(ValidationError, match="principal_id or principal_name, not both"):
         AuditService(session, GrantAuthorization(session)).query(
             admin, principal_id=bob.id, principal_name="bob"
         )

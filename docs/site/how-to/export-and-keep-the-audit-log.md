@@ -164,7 +164,7 @@ python3 -c 'import json; print(len(json.load(open("audit-all.json"))), "events")
 
 Without the CLI, the route is `GET /api/v1/audit-events` (the
 [REST API reference](../reference/rest-api.md)). It takes `event_type`, `kind`, `environment`,
-`principal_id` (or `principal`, a principal's name), `since`, `until`, `sort` and `order`
+`principal_id` (or `principal_name`, a principal's name), `since`, `until`, `sort` and `order`
 (`desc`, the default, or `asc`), `limit` (1 to 500, 100 by default) and `cursor`; each event also
 carries `principal_name`, the name of its principal. The body is
 `{"items": [...], "next_cursor": ...}`; send the same filters with the `next_cursor` of the last

@@ -92,7 +92,7 @@ export const AUDIT_EVENTS_LONG_NAME = AUDIT_EVENTS.map((event) =>
 );
 
 /**
- * Answers the audit log with {@link AUDIT_EVENTS}, narrowed by `principal` and `event_type` as
+ * Answers the audit log with {@link AUDIT_EVENTS}, narrowed by `principal_name` and `event_type` as
  * the route does, in the order asked, on one page; and the environments `dev` and `prod`.
  * Register it after `signInAsAdmin`, whose answer for the environments it replaces.
  *
@@ -107,7 +107,7 @@ export async function stubAudit(
     (url) => url.pathname === "/api/v1/audit-events",
     (route) => {
       const query = new URL(route.request().url()).searchParams;
-      const who = query.get("principal");
+      const who = query.get("principal_name");
       const type = query.get("event_type");
       const items = events.filter(
         (event) =>

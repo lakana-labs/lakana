@@ -52,7 +52,7 @@ describe("audit", () => {
     const sent = new URL(server.sent[0]?.path ?? "", "http://lakana.test").searchParams;
     expect(Object.fromEntries(sent)).toEqual({
       limit: String(AUDIT_PAGE),
-      principal: "maria",
+      principal_name: "maria",
       event_type: "GRANT_CREATED",
       environment: "dev",
       since: "2026-11-01T00:00:00.000Z",

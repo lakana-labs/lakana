@@ -328,7 +328,7 @@ class AuditService:
             )
         if principal_id is not None and principal_name is not None:
             raise ValidationError(
-                "Filter on principal_id or principal, not both: they name the same principal."
+                "Filter on principal_id or principal_name, not both: they name the same principal."
             )
         if event_type is AuditEventType.UNKNOWN:
             raise ValidationError(

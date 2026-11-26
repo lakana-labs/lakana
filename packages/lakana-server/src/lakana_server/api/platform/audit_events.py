@@ -150,7 +150,7 @@ def list_audit_events(
     ),
     environment: str | None = None,
     principal_id: uuid.UUID | None = None,
-    principal: str | None = Query(
+    principal_name: str | None = Query(
         default=None,
         max_length=255,
         description="Only events of the principal of this name; not with `principal_id`.",
@@ -172,7 +172,7 @@ def list_audit_events(
     `READ_AUDIT_LOG` on the instance. Another principal's query text and column values are
     hidden unless the caller also has `READ_QUERY_TEXT`. Answers 422 for a malformed cursor or
     one of the other order, an unknown `sort` or `order`, a `kind` other than
-    `connection`, an `event_type` that is not of `kind` or not a known type, `principal` with
+    `connection`, an `event_type` that is not of `kind` or not a known type, `principal_name` with
     `principal_id`, and 503 when
     the read had to be recorded in the audit log and could not be; no events are returned then.
     An event whose type this release does not know (written by a newer release before a
@@ -189,7 +189,7 @@ def list_audit_events(
         Only return events whose securable environment matches, if given.
     principal_id
         Only return events attributed to this principal, if given.
-    principal
+    principal_name
         Only return events attributed to the principal of this name, if given; a name nobody
         has matches no event. Not together with `principal_id`.
     since
@@ -222,7 +222,7 @@ def list_audit_events(
         If `p` may not read the audit log.
     ValidationError
         If `cursor` is malformed or of the other order, `kind` is not a kind, `event_type` is
-        not of `kind`, `sort` or `order` is unknown, or both `principal` and `principal_id` are
+        not of `kind`, `sort` or `order` is unknown, or both `principal_name` and `principal_id` are
         given; mapped to 422. An `event_type` that is
         no `AuditEventFilter` value (`UNKNOWN` among them) is refused with 422 before this
         function runs.
@@ -245,7 +245,7 @@ def list_audit_events(
         kind=kind,
         environment=environment,
         principal_id=principal_id,
-        principal_name=principal,
+        principal_name=principal_name,
         since=since,
         until=until,
         limit=limit,

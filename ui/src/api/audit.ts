@@ -77,7 +77,7 @@ export async function listAuditEvents(
 ): Promise<CursorPage<AuditEventOut>> {
   const query = new URLSearchParams({ limit: String(AUDIT_PAGE) });
   const values: Record<string, string | null> = {
-    principal: filter.principal,
+    principal_name: filter.principal,
     event_type: filter.eventType,
     environment: filter.environment,
     since: filter.since,

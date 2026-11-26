@@ -552,7 +552,9 @@ def test_each_event_names_its_principal_and_the_name_filters(client: TestClient)
     _bobs_query(client)
 
     every = client.get("/api/v1/audit-events", headers=AUTH_HEADER)
-    by_name = client.get("/api/v1/audit-events", headers=AUTH_HEADER, params={"principal": "bob"})
+    by_name = client.get(
+        "/api/v1/audit-events", headers=AUTH_HEADER, params={"principal_name": "bob"}
+    )
 
     assert every.status_code == 200, every.text
     named = {(e["event_type"], e["principal_name"]) for e in every.json()["items"]}
@@ -569,7 +571,7 @@ def test_a_filter_by_both_an_id_and_a_name_is_refused(client: TestClient) -> Non
     response = client.get(
         "/api/v1/audit-events",
         headers=AUTH_HEADER,
-        params={"principal": "bob", "principal_id": str(bob)},
+        params={"principal_name": "bob", "principal_id": str(bob)},
     )
 
     assert response.status_code == 422, response.text
