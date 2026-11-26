@@ -598,6 +598,22 @@ orphans (`lakana orphans`), and its project versions stay as history. Their `hea
 every [health signal](../reference/table-health.md) of an orphan warns. Only now can they be
 dropped: while a deployment builds a table, `lakana table delete` refuses it.
 
+In the web interface, open **Jobs**, then the **Deploys** tab, and choose the environment.
+**Undeploy…** stands beside the deploy marked `current` of each repository, if you may deploy
+there (a CI token never may: it is refused from the command line too). It asks first, naming what
+goes: every job the repository defines there, with its schedule and a start that waits for the
+active run, the service account its runs write as when one is bound, its glossary terms and its
+tables' health effects; and what stays: the tables and their data, as orphans, and the deploys,
+which stay listed. When it cannot read the jobs it says why and offers no undeploy, so nothing goes
+that the question did not name. Type the repository's name and press **Undeploy**; no passkey
+touch is asked, as an undeploy stops code and hands out nothing. While a run of the repository is
+queued or running the server refuses, and the question shows its sentence: cancel the run or wait
+for it, then try again. Once undeployed, the line under the list says so; no deploy of that
+repository is current any more, so none offers **Roll back to this…** or **Undeploy…**. Deploy
+it again (`lakana deploy`) to bring its jobs back, and bind its run principal again if it had one.
+The audit log records `UNDEPLOYED` with the repository and the project version, as from the
+command line.
+
 An environment cannot be deleted while a repository is deployed in it: `lakana env delete ENV`
 answers 409, naming the deployed repositories. Undeploy each one first, then delete.
 

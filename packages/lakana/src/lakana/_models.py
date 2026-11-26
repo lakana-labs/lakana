@@ -3560,9 +3560,9 @@ class Deploy:
         read only. `None` in a listing, for a run that made no project version and from a
         server that predates the field.
     actions
-        The words of what your rights allow on it: ``rollback``. Rights only; offer a
-        control when the word is listed and the deploy's state allows it. Empty from a
-        server that predates them.
+        The words of what your rights allow on it: ``rollback`` and ``undeploy`` (its
+        repository from the environment). Rights only; offer a control when the word is listed
+        and the deploy's state allows it. Empty from a server that predates them.
     """
 
     id: str

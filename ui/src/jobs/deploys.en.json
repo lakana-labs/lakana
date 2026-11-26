@@ -51,5 +51,27 @@
     "done": "Rolled back {{repository}} in {{environment}} to {{commit}}.",
     "failed": "The rollback failed: {{message}}",
     "failedWithout": "The rollback failed without saying why."
-  }
+  },
+  "undeploy": "Undeploy…",
+  "undeployWhat": "({{repository}} from {{environment}})",
+  "undeployDialog": {
+    "title": "Undeploy {{repository}} from {{environment}}?",
+    "reading": "Reading the jobs this removes…",
+    "text": "This removes the deployment of {{repository}} from {{environment}}, and with it:",
+    "gone": "What the undeploy removes",
+    "job": "{{job}}: removed",
+    "jobScheduled": "{{job}}: removed, with its schedule",
+    "jobWaiting": "{{job}}: removed; its waiting start is dropped",
+    "jobScheduledWaiting": "{{job}}: removed, with its schedule; its waiting start is dropped",
+    "noJobs": "{{repository}} defines no job in {{environment}}.",
+    "runAs": "The service account its runs write as, {{account}}: no longer bound",
+    "glossary": "Its glossary terms in {{environment}}",
+    "health": "The health effects of its tables: every health signal of these tables warns",
+    "kept": "Its tables and their data stay, as orphans, and its deploys stay listed. Deploying it again brings its jobs back.",
+    "keptRunAs": "Its tables and their data stay, as orphans, and its deploys stay listed. Deploying it again brings its jobs back, but its scheduled jobs do not run until an administrator binds {{account}} again, with a passkey touch.",
+    "type": "Type {{repository}} to confirm",
+    "held": "Type the repository's name exactly to undeploy it.",
+    "confirm": "Undeploy"
+  },
+  "undeployNote": "Undeployed {{repository}} from {{environment}}. Its tables stay, as orphans."
 }

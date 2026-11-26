@@ -221,12 +221,20 @@ const NAMED_LIMITS = [
   // Raised to the measured 3.8 kB (2026-11-22) + 10 %: each row's commit subject after its ID,
   // and current marked only on the newest successful run of each repository's current version
   // (#783).
-  { name: "the Deploys tab", prefix: "DeploysTab-", limit: "4.18 kB" },
+  // Raised to the measured 4.81 kB (2026-11-26) + 10 %: Undeploy… beside the current deploy,
+  // every row's button held while the current versions are read again after an undeploy, the
+  // undeploy's note, and the strings of its question (#830).
+  { name: "the Deploys tab", prefix: "DeploysTab-", limit: "5.3 kB" },
   // Measured 1.22 kB (2026-11-18) + 10 %: the rollback's question, loaded on the first press of
   // Roll back to this…: the two reads at once with their wait and Try again, what the rollback makes
   // current, the union of the jobs marked kept, removed or back, the protected environment named,
   // and Roll back with Cancel.
   { name: "the rollback's question", prefix: "RollbackDialog-", limit: "1.34 kB" },
+  // Measured 1.24 kB (2026-11-26) + 10 %: the undeploy's question, loaded on the first press of
+  // Undeploy…: the jobs read with its wait and Try again, what goes (each job with its schedule
+  // and a waiting start, the run principal, the glossary terms, the health effects) and what
+  // stays, the protected environment named, and the name typed before Undeploy (#830).
+  { name: "the undeploy's question", prefix: "UndeployDialog-", limit: "1.37 kB" },
   // Measured 278 B (2026-11-17) + 10 %: the job's page, for now its heading and breadcrumb.
   // Raised to the measured 2.65 kB (2026-11-17) + 10 %: the job read every 30 s, Run now and
   // Pause or Resume schedule with their notes, the facts (where it is defined, the schedule in
