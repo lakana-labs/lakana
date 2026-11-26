@@ -74,6 +74,7 @@ describe("places", () => {
       "status",
       "environments",
       "repositories",
+      "ci-trust",
       "access",
       "people",
       "groups",
@@ -89,6 +90,16 @@ describe("places", () => {
       "configuration",
       "audit",
     ]);
+  });
+
+  it("lists CI trust to administrators only, with the rules' pages below it", () => {
+    expect(listedPlaces(KIM).map((place) => place.id)).not.toContain("ci-trust");
+    expect(listedPlaces({ ...KIM, readsEnvironments: true }).map((p) => p.id)).not.toContain(
+      "ci-trust",
+    );
+    expect(placeAt("/settings/ci-trust")?.id).toBe("ci-trust");
+    expect(placeAt("/settings/ci-trust/explain")?.id).toBe("ci-trust");
+    expect(placeAt("/settings/ci-trust/7b0c7a52")?.id).toBe("ci-trust");
   });
 
   it("lists Configuration to administrators only", () => {

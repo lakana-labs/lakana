@@ -70,6 +70,7 @@ describe("SettingsScreen", () => {
       "Status",
       "Environments",
       "Repositories",
+      "CI trust",
       "People",
       "Groups",
       "Grants",

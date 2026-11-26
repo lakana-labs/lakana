@@ -122,6 +122,9 @@ lakana grant create --principal etl-dev --role DATA_ENGINEER --kind ENVIRONMENT 
 lakana deployments set-run-as readings --env dev --principal etl-dev
 ```
 
+In the web interface, **Set run-as** on the deployment in the environment's page under
+**Settings › Environments** binds it the same way.
+
 The binding belongs to the deployment and survives deploys and rollbacks. The principal must be an
 active service account. [Run principals](projects.md#run-principals) has the rest. Times that pass
 while no principal is bound are not caught up: after you bind one, the next time fires, not the

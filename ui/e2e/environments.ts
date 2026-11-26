@@ -1,7 +1,8 @@
 /**
  * Stubs for the end-to-end tests of Settings › Environments: the environments dev and prod
  * (protected) with the deleted dev-old and hdfs-old, which change as the tests create, protect,
- * delete and restore; usage, the storage's option keys, leftover directories; and mara, who
+ * delete and restore; usage, the storage's option keys, leftover directories; `analytics`
+ * deployed to both, its runs bound to etl-prod in prod and to nobody in dev; and mara, who
  * manages dev and dev-old and nothing on the instance.
  *
  * @packageDocumentation
@@ -79,6 +80,9 @@ const LEFTOVER = [
   },
 ];
 
+/** The commit of `analytics` deployed in each environment. */
+const DEPLOYED = "4f9d2a7c81b3e5f60718293a4b5c6d7e8f901234";
+
 /** The environments and parts of an environment the stubs answer. */
 const NAMES = ["dev", "prod", "staging", "dev-old", "hdfs-old"];
 const PARTS = [
@@ -91,6 +95,8 @@ const PARTS = [
   "/secrets",
   "/orphaned-locations",
   "/orphaned-locations/delete",
+  "/deployments",
+  "/deployments/analytics/run-as",
 ];
 
 /** The paths {@link stubEnvironments} answers, beside those of `session.ts`. */
@@ -166,6 +172,18 @@ export async function stubEnvironments(page: Page): Promise<void> {
       );
     },
   );
+  // Who the runs of `analytics` write as, by environment: bound in prod, not yet in dev.
+  const runAs = new Map<string, string | null>([
+    ["dev", null],
+    ["prod", "etl-prod"],
+  ]);
+  const deployment = (name: string): object => ({
+    repository: "analytics",
+    project_version_id: "7f3e2d1c-0b9a-4876-9543-210fedcba987",
+    commit_sha: DEPLOYED,
+    updated_at: AT,
+    run_as: runAs.get(name) ?? null,
+  });
   await page.route(
     (url) => /^\/api\/v1\/environments\/[^/]+(\/.*)?$/.test(url.pathname),
     async (route) => {
@@ -231,6 +249,16 @@ export async function stubEnvironments(page: Page): Promise<void> {
       }
       if (part === "storage") return answer(route, known);
       if (part === "secrets") return answer(route, []);
+      if (part === "deployments") {
+        return answer(route, runAs.has(name) ? [deployment(name)] : []);
+      }
+      if (part === "deployments/analytics/run-as") {
+        runAs.set(
+          name,
+          method === "PUT" ? (request.postDataJSON() as { principal: string }).principal : null,
+        );
+        return answer(route, deployment(name));
+      }
       if (part.startsWith("orphaned-locations")) {
         return answer(route, {
           environment: name,

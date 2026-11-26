@@ -709,6 +709,11 @@ lakana deployments --env prod            # shows run_as per repository
 lakana deployments set-run-as analytics --env prod --clear
 ```
 
+In the web interface, an environment's page under **Settings › Environments** lists its
+deployments, each with its commit and the account its runs write as; someone who manages the
+environment binds one with **Set run-as** (or **Change**), which asks for a passkey touch first,
+and removes it with **Clear**.
+
 Binding needs `MANAGE_ENVIRONMENT`; the principal must be an active service account (an unknown
 name and a user both answer 404 "not found or not a service account"). Clearing a deployment
 that has no binding changes nothing and is not audited. The binding

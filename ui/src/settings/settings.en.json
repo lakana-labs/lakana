@@ -4,6 +4,7 @@
   "status": "Status",
   "environments": "Environments",
   "repositories": "Repositories",
+  "ciTrust": "CI trust",
   "access": "Access",
   "people": "People",
   "groups": "Groups",

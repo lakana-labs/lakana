@@ -196,6 +196,18 @@ the repository:
 It answers with a verdict (`accepted by rule …` or `refused: …`), the ids of the matching rules,
 and for every rule the reasons it does not match. It records nothing and issues nothing.
 
+### In the web interface
+
+**Settings › CI trust** is the same for an administrator (others are not shown it): the rules,
+oldest first, with their issuer, account, what they allow and whether they are enabled; **Add
+rule**; each rule's page with its claims, **Edit** (the account, what it allows, the claims and
+whether a deploy starts the `on_deploy` jobs; the issuer, environment and repository never change),
+**Disable** or **Enable**, and **Delete rule**; and **Explain a CI job's claims**. Every change
+asks for a passkey touch first, as the routes do, and shows the server's refusal next to the form.
+Where an access file manages the rule's environment or the instance, nothing can be changed there:
+the page names the file and the command an administrator runs in an emergency. The interface never
+overrides an access file.
+
 ## In the CI job
 
 `lakana deploy` (with or without `--dry-run`) exchanges the job's ID token instead of reading a

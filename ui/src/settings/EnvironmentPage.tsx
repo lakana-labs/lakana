@@ -1,7 +1,7 @@
 /**
- * An environment's page in Settings › Environments: its storage, protection, retention and
- * properties; for those who manage it its usage; and for those who manage environments on the
- * instance its protection.
+ * An environment's page in Settings › Environments: its storage, protection, retention,
+ * properties and deployments with their run-as accounts; for those who manage it its usage and
+ * the run-as bindings; and for those who manage environments on the instance its protection.
  *
  * @remarks
  * The page is not polled: it is read once, and again after every change made here. Protecting
@@ -73,6 +73,9 @@ const DIALOGS = {
 const DeleteEnvironmentDialog: ComponentType<DeleteEnvironmentDialogProps> = lazy(async () => ({
   default: (await import("./EnvironmentDialogs")).DeleteEnvironmentDialog,
 }));
+
+// The deployments and their run-as accounts load on their own, with their dialogs.
+const RunAsPanel = lazy(async () => ({ default: (await import("./RunAsPanel")).RunAsPanel }));
 
 // Leftover directories load on their own, only for those who manage environments on the instance.
 const LeftoverDirectories = lazy(async () => ({
@@ -439,6 +442,13 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
               protectButton={protectButton}
             />
             {manages && <EnvironmentUsage name={environment.name} paused={deleting} />}
+            <Suspense fallback={null}>
+              <RunAsPanel
+                environment={environment.name}
+                isProtected={environment.is_protected}
+                manages={manages}
+              />
+            </Suspense>
             {creates && (
               <StoragePanel
                 environment={environment}

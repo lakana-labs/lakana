@@ -11,6 +11,7 @@ import {
   TOKENS_STUBBED,
 } from "./access";
 import { apiTypes, typeOf } from "./api-types";
+import { CI_TRUST_STUBBED, DEV_RULE, PROD_RULE, stubCiTrust } from "./ciTrust";
 import { ARTIFACTS_STUBBED, stubArtifacts } from "./artifacts";
 import { AUDIT_STUBBED, stubAudit } from "./audit";
 import { ROUTES, stubConnect } from "./connect";
@@ -91,6 +92,8 @@ const LITERAL_CODES: Record<string, string> = {
   AttentionItemOut: "kind",
   AuditEventOut: "securable_kind",
   CheckResultOut: "outcome",
+  CiTrustRuleCreate: "kinds",
+  CiTrustRuleOut: "kinds",
   ColumnOut: "description_source label_source",
   ConfigurationSettingOut: "source",
   ConnectionCreateIn: "kind",
@@ -788,7 +791,77 @@ walk("Environments mark hidden characters", async ({ page }) => {
   await expect(page.getByRole("dialog")).toBeVisible();
   await expectMarked(page, "Delete environment", ["dev"]);
   await page.keyboard.press("Escape");
+  // The deployments and who their runs write as.
+  await visit(page, "/settings/environments/prod", ["etl-prod"]);
+  await page.getByRole("button", { name: /^Change the run-as account of analytics/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "Set run-as", ["analytics", "prod"]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await page.getByRole("button", { name: /^Clear the run-as account of analytics/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "Clear run-as", ["analytics", "prod"]);
+  await page.keyboard.press("Escape");
   expectOnlyStubbed(paths, [...STUBBED, ...ENVIRONMENTS_STUBBED]);
+});
+
+walk("CI trust, a rule and Explain mark hidden characters", async ({ page }) => {
+  const paths = apiPaths(page);
+  await signInAsAdmin(poisoned(page));
+  await stubCiTrust(poisoned(page), ["prod"]);
+  await visit(page, "/settings/ci-trust", ["analytics", "ci-prod", "ci-dev", "access.yaml"]);
+  await page.getByRole("button", { name: "Add rule" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /Environment$/ })
+    .click();
+  await expect(page.getByRole("listbox")).toContainText("prodU+202E");
+  await expectNoRaw(page, "Add rule's environments");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toBeHidden();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /Repository$/ })
+    .click();
+  await expect(page.getByRole("listbox")).toContainText("dbt-modelsU+202E");
+  await expectNoRaw(page, "Add rule's repositories");
+  await page.keyboard.press("Escape");
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  // A managed environment's rule: its claims, the file and the emergency command.
+  await visit(page, `/settings/ci-trust/${PROD_RULE}`, [
+    "refs/heads/main",
+    "ci-prod",
+    "access.yaml",
+    "https://token.actions.githubusercontent.com",
+  ]);
+  await visit(page, `/settings/ci-trust/${DEV_RULE}`, ["lakana-dry-run", "maria"]);
+  await page.getByRole("button", { name: /^Edit the rule for analytics/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "Edit a rule", ["analytics", "dev"]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await page.getByRole("button", { name: /^Delete rule for analytics/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "Delete a rule", ["analytics", "dev"]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  await page.goto("/settings/ci-trust/explain");
+  await page.getByRole("textbox", { name: "Claims" }).fill('{"ref": "refs/heads/main"}');
+  await page.getByRole("button", { name: /Environment$/ }).click();
+  await page.getByRole("option", { name: /^prod/ }).click();
+  await page.getByRole("button", { name: /Repository$/ }).click();
+  await page.getByRole("option", { name: /^analytics/ }).click();
+  await page.getByRole("button", { name: "Explain" }).click();
+  await expect(page.getByRole("region", { name: "Verdict" })).toBeVisible();
+  await expectMarked(page, "Explain's report", [
+    "analytics",
+    "the rule is for environment 'dev', not 'prod'",
+  ]);
+  expectOnlyStubbed(paths, [...STUBBED, ...CI_TRUST_STUBBED]);
 });
 
 walk("the results of the catalog's actions mark hidden characters", async ({ page }) => {

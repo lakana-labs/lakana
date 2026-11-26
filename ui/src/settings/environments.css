@@ -80,3 +80,8 @@
 .list-scroll.leftover-scroll .leftover-location {
   overflow-wrap: normal;
 }
+
+/* An environment's deployments and who their runs write as, in their own scrolling region. */
+.list-scroll.run-as-scroll .list {
+  min-width: 560px;
+}

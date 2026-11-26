@@ -42,7 +42,9 @@ const NAMED_LIMITS = [
   // Raised 2026-11-20 to the measured 4.95 kB + 10 %: the Settings PRs left it at its limit, and
   // any change that renames a lazy chunk the frame preloads (its import map grows a few bytes) put
   // it over by 2–8 B on unrelated pull requests (#761, #762).
-  { name: "the Settings frame", prefix: "SettingsScreen-", limit: "5.45 kB" },
+  // Raised to the measured 5.47 kB (2026-11-26, #829 after #835) + 10 %: two new places, CI trust
+  // and Audit log, each a registry entry and a loader in the frame.
+  { name: "the Settings frame", prefix: "SettingsScreen-", limit: "6.02 kB" },
   // Measured 3.27 kB (2026-11-19) + 10 %: a repository's page (its overview, credential, host
   // keys and deploy keys, Test access with the environment picker, and the loaders of its
   // dialogs, which load when one is opened: RepositoryDialogs-, on the shared limit).
@@ -53,7 +55,13 @@ const NAMED_LIMITS = [
   // Unprotect and Set retention, usage, Storage and Delete environment, and the loaders of its
   // dialogs and of Leftover directories, which load on their own: EnvironmentDialogs- and
   // LeftoverDirectories-).
-  { name: "an environment's page", prefix: "EnvironmentPage-", limit: "4.31 kB" },
+  // Raised to the measured 4.63 kB (2026-11-26, #829) + 10 %: the loader of the deployments and
+  // their run-as accounts (RunAsPanel-, on the shared limit) and the shared chunks it preloads.
+  { name: "an environment's page", prefix: "EnvironmentPage-", limit: "5.09 kB" },
+  // Measured 5.03 kB (2026-11-26, #829) + 10 %: Settings › CI trust, its list with the managed
+  // marks and note, Add rule's loader and the address that opens it, and the loaders of a rule's
+  // page and Explain (CiTrustRulePage-, CiTrustExplain-, CiTrustDialogs-: on the shared limit).
+  { name: "CI trust", prefix: "CiTrustRoutes-", limit: "5.53 kB" },
   // Measured 4.11 kB (2026-11-19) + 10 %: the dialogs of Settings › Environments (Create
   // environment, Set retention, Change storage, Delete environment, and a deleted environment's
   // Restore, Delete the files and Remove from the catalog), loaded when one is first opened.
@@ -716,6 +724,9 @@ export default [
   // Raised to the measured 14.85 kB (2026-11-19) + 10 %: the instance's state, shared by Home and
   // Settings › Status (moved out of Home's stylesheet), the Status panels and workers' table,
   // and the repositories' list and page, each loaded with its own place.
-  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "16.34 kB" },
+  // Raised to the measured 16.61 kB (2026-11-26, #829) + 10 %: CI trust's stylesheet (the rules'
+  // and claims' tables, the claim rows of Add rule, Explain's claims and report) and the run-as
+  // table of an environment's page, each loaded with its own place.
+  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "18.27 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];
