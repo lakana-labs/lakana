@@ -90,9 +90,9 @@ function Reading({ label }: ReadingProps): JSX.Element {
  * one is bound, the repository's glossary terms and its tables' health effects; and says what
  * stays, and that a bound service account must be bound again after a new deploy. Undeploy is
  * held, and says why, until the repository's name is typed exactly. A refusal (a run still
- * active, a deploy or rollback queued, the deployment moved or already gone) stays in the dialog in the server's words and takes the
- * focus. While the request is open, Escape and Cancel do nothing. Undeploy asks for no passkey
- * touch: it stops code and hands out nothing.
+ * active, a deploy or rollback queued, the deployment moved or already gone) stays in the dialog
+ * in the server's words and takes the focus. While the request is open, Escape and Cancel do
+ * nothing. Undeploy asks for no passkey touch: it stops code and hands out nothing.
  *
  * @param props - The environment, the repository, its run principal, the protection and the
  *   handlers.

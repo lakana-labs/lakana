@@ -10,6 +10,7 @@ as asked). The two-session scenarios are shared with the Postgres module
 from __future__ import annotations
 
 import hashlib
+import sqlite3
 import threading
 import time
 import uuid
@@ -21,8 +22,10 @@ import pytest
 from core_test_helpers import _prepared_catalog
 from sqlalchemy import event, select, update
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.orm import Session
+from sqlalchemy.pool import ConnectionPoolEntry
 from sqlalchemy.sql import ClauseElement
 from test_projects_deploys import _claimed, _deployed, _manifest, _repo
 
@@ -329,6 +332,98 @@ class _HeldCommit:
         self.release.wait(_JOIN_SECONDS)
 
 
+class InFlight:
+    """What each thread is executing on an engine right now, and on which Postgres backend.
+
+    A statement is in flight from `before_cursor_execute` until `after_cursor_execute` (or
+    `handle_error`) in the same thread: a thread whose write is in flight while another session
+    holds the lock it needs is waiting inside the database, not merely slow.
+
+    Parameters
+    ----------
+    engine
+        The engine to watch; `close` stops watching.
+    """
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+        self.database = engine.url.database or ""
+        self._lock = threading.Lock()
+        self._statements: dict[int, tuple[str, int | None]] = {}
+        self._listeners: list[tuple[str, Callable[..., None]]] = [
+            ("checkout", self._checkout),
+            ("before_cursor_execute", self._before),
+            ("after_cursor_execute", self._after),
+            ("handle_error", self._after),
+        ]
+        for name, listener in self._listeners:
+            event.listen(engine, name, listener)
+
+    def close(self) -> None:
+        """Stop watching the engine."""
+        for name, listener in self._listeners:
+            event.remove(self._engine, name, listener)
+
+    def _checkout(
+        self, dbapi_connection: DBAPIConnection, record: ConnectionPoolEntry, *_: object
+    ) -> None:
+        """Note the Postgres backend of a connection once.
+
+        Parameters
+        ----------
+        dbapi_connection
+            The driver's connection.
+        record
+            Its pool record, whose `info` keeps the backend's pid.
+        """
+        if self._engine.dialect.name != "postgresql" or "pid" in record.info:
+            return
+        cursor = dbapi_connection.cursor()
+        cursor.execute("SELECT pg_backend_pid()")
+        row = cursor.fetchone()
+        assert row is not None
+        record.info["pid"] = row[0]
+        cursor.close()
+
+    def _before(self, connection: Connection, _cursor: object, statement: str, *_: object) -> None:
+        """Note the statement this thread starts.
+
+        Parameters
+        ----------
+        connection
+            The SQLAlchemy connection, whose `info` may hold the backend's pid.
+        statement
+            The statement.
+        """
+        with self._lock:
+            self._statements[threading.get_ident()] = (statement, connection.info.get("pid"))
+
+    def _after(self, *_: object) -> None:
+        """Note that this thread's statement ended."""
+        with self._lock:
+            self._statements.pop(threading.get_ident(), None)
+
+    def of(self, thread: threading.Thread) -> tuple[str, int | None] | None:
+        """Return the statement a thread is executing, with its backend's pid, if any.
+
+        Parameters
+        ----------
+        thread
+            The thread.
+
+        Returns
+        -------
+        tuple or None
+            The statement and the pid (`None` off Postgres), or `None` when nothing is in flight.
+        """
+        with self._lock:
+            return None if thread.ident is None else self._statements.get(thread.ident)
+
+
+Waiter = Callable[[threading.Thread, InFlight], None]
+"""Returns once a thread waits inside the database for the other session's lock, else fails."""
+
+
 def _set_up(engine: Engine, tmp_path: Path) -> tuple[PrincipalRef, uuid.UUID]:
     """Deploy `analytics` to `dev` on a fresh schema.
 
@@ -355,7 +450,7 @@ def _set_up(engine: Engine, tmp_path: Path) -> tuple[PrincipalRef, uuid.UUID]:
 
 
 def a_submit_first_refuses_the_undeploy(
-    engine: Engine, tmp_path: Path, wait_until_blocked: Callable[[threading.Thread], None]
+    engine: Engine, tmp_path: Path, wait_until_blocked: Waiter
 ) -> None:
     """Check that a submit still inside its commit makes an undeploy wait, then refuse.
 
@@ -369,6 +464,7 @@ def a_submit_first_refuses_the_undeploy(
         Returns once the undeploy's thread waits for the submit's lock.
     """
     p, version_id = _set_up(engine, tmp_path)
+    in_flight = InFlight(engine)
     with Session(engine) as submitting, Session(engine) as undeploying:
         held = _HeldCommit(submitting)
         submit, submitted = _in_thread(lambda: _submit(submitting, p).id)
@@ -377,11 +473,12 @@ def a_submit_first_refuses_the_undeploy(
             lambda: _service(undeploying).undeploy(p, "dev", "analytics")
         )
         try:
-            wait_until_blocked(undeploy)
+            wait_until_blocked(undeploy, in_flight)
         finally:
             held.release.set()
             submit.join(_JOIN_SECONDS)
             undeploy.join(_JOIN_SECONDS)
+            in_flight.close()
         assert "error" not in submitted
         error = undeployed.get("error")
         assert isinstance(error, ConflictError), undeployed
@@ -393,7 +490,7 @@ def a_submit_first_refuses_the_undeploy(
 
 
 def an_undeploy_first_lets_the_submit_deploy_again(
-    engine: Engine, tmp_path: Path, wait_until_blocked: Callable[[threading.Thread], None]
+    engine: Engine, tmp_path: Path, wait_until_blocked: Waiter
 ) -> None:
     """Check that an undeploy inside its commit makes a submit wait, and the deploy goes ahead.
 
@@ -407,6 +504,7 @@ def an_undeploy_first_lets_the_submit_deploy_again(
         Returns once the submit's thread waits for the undeploy's lock.
     """
     p, _ = _set_up(engine, tmp_path)
+    in_flight = InFlight(engine)
     with Session(engine) as undeploying, Session(engine) as submitting:
         held = _HeldCommit(undeploying)
         undeploy, undeployed = _in_thread(
@@ -415,11 +513,12 @@ def an_undeploy_first_lets_the_submit_deploy_again(
         assert held.flushed.wait(_JOIN_SECONDS)
         submit, submitted = _in_thread(lambda: _submit(submitting, p).id)
         try:
-            wait_until_blocked(submit)
+            wait_until_blocked(submit, in_flight)
         finally:
             held.release.set()
             undeploy.join(_JOIN_SECONDS)
             submit.join(_JOIN_SECONDS)
+            in_flight.close()
         assert undeployed == {"result": None}
         assert "error" not in submitted
         run_id = submitted["result"]
@@ -451,28 +550,56 @@ def sqlite_file(tmp_path: Path) -> Iterator[Engine]:
     engine.dispose()
 
 
-def _still_waiting(thread: threading.Thread) -> None:
-    """Give a thread time to reach SQLite's writer lock and check it waits there.
+def _waiting_for_the_writer(thread: threading.Thread, in_flight: InFlight) -> None:
+    """Return once the thread waits for SQLite's writer lock, which the other session holds.
+
+    Observed, not timed: the thread's write statement is in flight (SQLite's busy timeout is
+    retrying it inside `sqlite3`), and at that moment a probe connection that does not wait is
+    refused the writer lock (`BEGIN IMMEDIATE`: "database is locked").
 
     Parameters
     ----------
     thread
         The waiting thread.
+    in_flight
+        What each thread executes.
+
+    Raises
+    ------
+    AssertionError
+        If the thread ended, or was not seen waiting within 30 s.
     """
-    time.sleep(0.5)
-    assert thread.is_alive()
+    deadline = time.monotonic() + 30.0
+    while time.monotonic() < deadline and thread.is_alive():
+        current = in_flight.of(thread)
+        if current is not None and current[0].lstrip().upper().startswith(("DELETE", "INSERT")):
+            database = in_flight.database
+            probe = sqlite3.connect(database, timeout=0)
+            try:
+                probe.execute("BEGIN IMMEDIATE")
+            except sqlite3.OperationalError as refused:
+                if "locked" in str(refused) and in_flight.of(thread) == current:
+                    return
+            else:
+                probe.rollback()
+            finally:
+                probe.close()
+        time.sleep(0.05)
+    raise AssertionError("the second session never waited for SQLite's writer lock")
 
 
 def test_on_sqlite_a_submit_first_refuses_the_undeploy(sqlite_file: Engine, tmp_path: Path) -> None:
     """SQLite's one writer orders them; the undeploy then sees the queued deploy."""
-    a_submit_first_refuses_the_undeploy(sqlite_file, tmp_path / "store", _still_waiting)
+    a_submit_first_refuses_the_undeploy(sqlite_file, tmp_path / "store", _waiting_for_the_writer)
 
 
 def test_on_sqlite_an_undeploy_first_lets_the_submit_deploy_again(
     sqlite_file: Engine, tmp_path: Path
 ) -> None:
     """The submit waits for the undeploy's commit, then its deploy makes a new pointer."""
-    an_undeploy_first_lets_the_submit_deploy_again(sqlite_file, tmp_path / "store", _still_waiting)
+    an_undeploy_first_lets_the_submit_deploy_again(
+        sqlite_file, tmp_path / "store", _waiting_for_the_writer
+    )
 
 
 def _meanwhile(
