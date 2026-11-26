@@ -153,7 +153,7 @@ export const DEPLOY_FAILURE = "lakana.yaml: the job weekly_report selects nothin
 export const OLDER_ONLY_JOB = "weekly_report";
 
 /** The project versions: the current one, the older deploy's and the older rollback's. */
-const VERSIONS = {
+export const VERSIONS = {
   current: "1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9",
   older: "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f9a0",
   rollback: "3c4d5e6f-7081-4293-a4b5-c6d7e8f9a0b1",

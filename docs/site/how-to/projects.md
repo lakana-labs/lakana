@@ -580,8 +580,20 @@ limit: keep inputs narrow. Polars 1 does not spill in this way and ignores the s
 lakana undeploy analytics --env dev --yes
 ```
 
-Removes the deployment pointer and the identity its runs use (needs `DEPLOY`); refused while a run
-of the repository is queued or running there. Data is untouched: the repository's tables become
+Removes the deployment pointer and the identity its runs use (needs `DEPLOY`). It is refused (409)
+while a run of the repository is queued or running there, and while a deploy or rollback of it is
+queued or running there: the message names that deploy (`Deploy 7c1f… of 'analytics' is queued in
+'dev'; wait for it to finish before undeploying.`). Follow it with `lakana deploys show ID --env
+dev` and undeploy once it has finished. A dry run does not hold it. A deploy you ask for after the
+undeploy deploys the repository again, without the identity the undeploy removed: bind it again
+with `lakana deployments set-run-as` before its runs need it.
+
+Through the API, `DELETE /api/v1/environments/{env}/deployments/{repo}` takes an optional
+`expected_project_version_id`, the `project_version_id` you read from the deployment: when the
+deployment points at another project version by then, the undeploy is refused with 409 and nothing
+changes (the SDK: `client.deployments.undeploy(env, repo, expected_project_version_id=...)`).
+
+Data is untouched: the repository's tables become
 orphans (`lakana orphans`), and its project versions stay as history. Their `health:` effects go:
 every [health signal](../reference/table-health.md) of an orphan warns. Only now can they be
 dropped: while a deployment builds a table, `lakana table delete` refuses it.
@@ -594,9 +606,11 @@ active run, the service account its runs write as when one is bound, its glossar
 tables' health effects; and what stays: the tables and their data, as orphans, and the deploys,
 which stay listed. When it cannot read the jobs it says why and offers no undeploy, so nothing goes
 that the question did not name. Type the repository's name and press **Undeploy**; no passkey
-touch is asked, as an undeploy stops code and hands out nothing. While a run of the repository is
-queued or running the server refuses, and the question shows its sentence: cancel the run or wait
-for it, then try again. Once undeployed, the line under the list says so; no deploy of that
+touch is asked, as an undeploy stops code and hands out nothing. While a run, a deploy or a
+rollback of the repository is queued or running the server refuses, and the question shows its
+sentence: cancel the run or wait for it to end, then try again. The question sends the project
+version the row showed as current, so when someone deployed or rolled back meanwhile it is refused
+too, and nothing goes that you did not see. Once undeployed, the line under the list says so; no deploy of that
 repository is current any more, so none offers **Roll back to this…** or **Undeploy…**. Deploy
 it again (`lakana deploy`) to bring its jobs back, and bind its run principal again if it had one.
 The audit log records `UNDEPLOYED` with the repository and the project version, as from the

@@ -997,7 +997,19 @@ undeploy is audited in the same transaction. An unknown principal name and a non
 answer with the same 404, so names cannot be enumerated. Undeploy deletes the pointer
 and then checks for an active run in the same transaction; a run start locks the pointer with a
 conditional no-op update (`DeployService.lock_deployment`), so the two serialize on Postgres and on
-SQLite alike.
+SQLite alike. It is refused as well while a deploy or rollback of the repository is queued or
+running in the environment (#838): that deploy would otherwise deploy the repository again
+afterwards, through `_swap_pointer(expected=None)`, without the binding. **Lock order:** a submit of
+a deploy or rollback and an undeploy take the deploy-queue lock first (`_lock_deploy_queue`, a
+Postgres advisory lock with two integer keys, `DEPLOY_QUEUE_LOCK_KEY` and 32 bits of a digest of
+environment and repository; nothing else takes it), then the submit inserts its run and uses a CI
+token's row, and the undeploy deletes the pointer (conditional on the version it read, so a deploy
+that lands in between is not deleted: 409) and checks runs and deploy runs. On SQLite the submit's
+insert and the undeploy's delete order them through the one writer lock. A deploy that reaches its
+swap with no pointer after an undeploy was therefore queued after the undeploy committed, and it
+goes ahead: it is a deploy someone asked for after the undeploy. The DELETE takes an optional
+`expected_project_version_id` (409 when the pointer is elsewhere); without it any current version
+is undeployed, as before. Pins: `test_undeploy_queued_deploys.py` and its Postgres module.
 
 ## Descriptions of tables and columns
 

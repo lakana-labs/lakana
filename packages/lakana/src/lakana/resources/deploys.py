@@ -583,7 +583,13 @@ class Deployments:
         )
         return deployment_from_json(response.json())
 
-    def undeploy(self, environment: str, repository: str) -> None:
+    def undeploy(
+        self,
+        environment: str,
+        repository: str,
+        *,
+        expected_project_version_id: str | None = None,
+    ) -> None:
         """Remove a repository's deployment; data stays (needs `DEPLOY`).
 
         Parameters
@@ -592,15 +598,25 @@ class Deployments:
             Environment name.
         repository
             Repository name.
+        expected_project_version_id
+            The project version you saw as current (`Deployment.project_version_id`); the
+            undeploy is then refused if the deployment points at another one. `None` undeploys
+            whatever is current.
 
         Raises
         ------
         lakana.errors.Conflict
-            While a run of the repository is active there.
+            While a run, or a deploy or rollback, of the repository is queued or running there,
+            or when the deployment is not at `expected_project_version_id`.
         """
         self._transport.request(
             ROUTES["deployments.undeploy"],
             path_params={"env": environment, "repo": repository},
+            params=(
+                None
+                if expected_project_version_id is None
+                else {"expected_project_version_id": expected_project_version_id}
+            ),
         )
 
 
