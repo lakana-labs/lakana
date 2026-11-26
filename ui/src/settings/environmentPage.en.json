@@ -46,7 +46,7 @@
   "runAs": {
     "title": "Deployments",
     "region": "Deployments in {{name}}",
-    "intro": "Each repository deployed here, its commit, and the service account its runs write as. A scheduled run always writes as that account; in a protected environment every run does.",
+    "intro": "Each repository deployed here, its commit, and who its runs write as. Once an account is bound, every run of the deployment writes as it, scheduled or started by a person, in a protected environment or not.",
     "repository": "Repository",
     "commit": "Commit",
     "runsAs": "Runs as",

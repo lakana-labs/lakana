@@ -94,6 +94,12 @@
   flex: 0 0 80px;
 }
 
+/* A refusal of the claim rows, beside them, in the colour of errors. */
+.ci-trust-claims-error {
+  margin: 0;
+  color: var(--color-bad);
+}
+
 /* Explain: the pasted claims are code, typed in a monospace box that grows with them; the
    rules' reasons are a list under each rule. */
 .field textarea.ci-trust-claims {

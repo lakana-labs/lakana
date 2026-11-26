@@ -43,6 +43,12 @@ describe("RunAsPanel", () => {
     });
 
     const region = await screen.findByRole("region", { name: "Deployments in prod" });
+    // As the server's _choose_run_as: a bound account writes every run, whoever starts it.
+    expect(
+      screen.getByText(
+        "Each repository deployed here, its commit, and who its runs write as. Once an account is bound, every run of the deployment writes as it, scheduled or started by a person, in a protected environment or not.",
+      ),
+    ).toBeInTheDocument();
     const analytics = within(region).getByText("analytics").closest("tr") as HTMLElement;
     expect(analytics).toHaveTextContent("9c1e5b3");
     expect(analytics).toHaveTextContent("No account: runs are refused until one is bound");

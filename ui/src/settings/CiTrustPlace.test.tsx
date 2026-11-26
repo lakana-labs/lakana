@@ -284,4 +284,42 @@ describe("CiTrustPlace", () => {
     ).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Add rule" })).toBeNull();
   });
+
+  it("holds Add rule while a claim has no text, or one claim is named twice", async () => {
+    const { server, user } = renderShell(PATH, { routes: ciTrustRoutes() });
+
+    await user.click(await screen.findByRole("button", { name: "Add rule" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add a CI trust rule" });
+    await user.click(within(dialog).getByRole("button", { name: /Environment/ }));
+    await user.click(await screen.findByRole("option", { name: /dev/ }));
+    await user.click(within(dialog).getByRole("button", { name: /Repository/ }));
+    await user.click(await screen.findByRole("option", { name: "dbt" }));
+    await user.type(within(dialog).getByRole("combobox", { name: "Acts as" }), "ci-dev");
+    await user.keyboard("{Escape}");
+    const add = within(dialog).getByRole("button", { name: "Add rule" });
+    // repository_id starts without its number: that alone holds the form.
+    expect(add).toBeDisabled();
+    expect(
+      within(dialog).getByText("Give every claim a name and the text it must equal."),
+    ).toBeInTheDocument();
+    await user.type(within(dialog).getByRole("textbox", { name: "Value of claim 1" }), "123456");
+    expect(add).toBeEnabled();
+
+    await user.click(within(dialog).getByRole("button", { name: "Add a claim" }));
+    await user.type(within(dialog).getByRole("textbox", { name: "Claim 4" }), " ref ");
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "Value of claim 4" }),
+      "refs/heads/dev",
+    );
+    expect(add).toBeDisabled();
+    const group = within(dialog).getByRole("group", { name: "Claims the ID token must have" });
+    expect(within(group).getByRole("alert")).toHaveTextContent(
+      "Name each claim once: ref is there twice.",
+    );
+    const removes = within(dialog).getAllByRole("button", { name: "Remove the claim ref" });
+    await user.click(removes[1] as HTMLElement);
+    expect(within(group).queryByRole("alert")).toBeNull();
+    expect(add).toBeEnabled();
+    expect(server.sent.filter((request) => request.method === "POST")).toEqual([]);
+  });
 });

@@ -88,6 +88,8 @@ interface ConditionsFieldProps {
   readonly onChange: (rows: readonly ConditionRow[]) => void;
   /** The sentence of which claims the issuer's rules must pin. */
   readonly help: string;
+  /** A refusal of the rows as they are, such as a claim named twice; null for none. */
+  readonly error: string | null;
 }
 
 /**
@@ -99,9 +101,10 @@ interface ConditionsFieldProps {
  * @param props.rows - The rows.
  * @param props.onChange - Called with the rows after a change.
  * @param props.help - Which claims the rule must pin.
+ * @param props.error - A refusal of the rows as they are.
  * @returns The field.
  */
-function ConditionsField({ rows, onChange, help }: ConditionsFieldProps): JSX.Element {
+function ConditionsField({ rows, onChange, help, error }: ConditionsFieldProps): JSX.Element {
   const { t } = useTranslation();
   const change = (index: number, row: Partial<ConditionRow>): void => {
     onChange(rows.map((old, at) => (at === index ? { ...old, ...row } : old)));
@@ -165,6 +168,11 @@ function ConditionsField({ rows, onChange, help }: ConditionsFieldProps): JSX.El
           {t(`${P}.addClaim`)}
         </Button>
       </p>
+      {error !== null && (
+        <p className="ci-trust-claims-error" role="alert">
+          {error}
+        </p>
+      )}
     </fieldset>
   );
 }
@@ -307,6 +315,24 @@ function changesOf(rule: CiTrustRuleOut, fields: Fields): CiTrustRuleChanges {
 }
 
 /**
+ * The first claim name that two rows give, once trimmed as the form sends it; null when each
+ * name is given once. Two such rows would be one condition, and the form would save less than
+ * it shows.
+ *
+ * @param rows - The rows.
+ * @returns The name, or null.
+ */
+function claimNamedTwice(rows: readonly ConditionRow[]): string | null {
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const name = row.name.trim();
+    if (name !== "" && seen.has(name)) return name;
+    seen.add(name);
+  }
+  return null;
+}
+
+/**
  * Says what the form still needs, in the order of its fields; null when it is complete.
  *
  * @param fields - The form.
@@ -359,13 +385,17 @@ export function RuleDialog({ mode, scopes, onDone, onClose }: RuleDialogProps): 
   const managed =
     fields.environment === null ? null : managedScopeOf(scopes, fields.environment.trim());
   const lacking = missingKey(fields);
+  const twice = claimNamedTwice(fields.conditions);
+  const twiceText = twice === null ? null : t(`${P}.claimTwice`, { name: twice });
   const changes = mode.kind === "edit" ? changesOf(mode.rule, fields) : null;
   const held =
     lacking !== null
       ? t(`${P}.${lacking}`)
-      : changes !== null && Object.keys(changes).length === 0
-        ? t(`${P}.nothingChanged`)
-        : null;
+      : twiceText !== null
+        ? twiceText
+        : changes !== null && Object.keys(changes).length === 0
+          ? t(`${P}.nothingChanged`)
+          : null;
   const close = (): void => {
     if (!attempt.busy) onClose();
   };
@@ -539,6 +569,7 @@ export function RuleDialog({ mode, scopes, onDone, onClose }: RuleDialogProps): 
         <ConditionsField
           rows={fields.conditions}
           help={t(conditionsHelpKey(fields.issuer))}
+          error={twiceText}
           onChange={(conditions) => {
             setTouched(true);
             set({ conditions });

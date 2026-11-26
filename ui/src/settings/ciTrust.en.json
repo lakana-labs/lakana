@@ -109,6 +109,7 @@
     "principalNeeded": "Fill in the service account it acts as.",
     "kindsNeeded": "Allow deploy, dry run or both.",
     "conditionsNeeded": "Give every claim a name and the text it must equal.",
+    "claimTwice": "Name each claim once: {{name}} is there twice.",
     "nothingChanged": "Nothing has changed yet.",
     "endsTokens": "Saving ends the tokens issued under the rule before."
   },
@@ -128,8 +129,10 @@
     "notJson": "The claims are not JSON: paste the ID token's decoded payload, one JSON object.",
     "notObject": "The claims must be one JSON object, the ID token's decoded payload.",
     "looksLikeToken": "This looks like an ID token, not its claims. Paste only the decoded payload: a token is a credential and is never sent here.",
+    "holdsToken": "A value of these claims looks like a token. Paste only the decoded payload of the ID token, without any token in it: a token is a credential and is never sent here.",
     "verdict": "Verdict",
     "accepted": "Accepted",
+    "acceptedBy": "by the rule {{name}}.",
     "refused": "Refused",
     "rules": "Every rule",
     "noRules": "There is no rule yet.",

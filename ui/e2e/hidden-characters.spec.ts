@@ -837,7 +837,7 @@ walk("CI trust, a rule and Explain mark hidden characters", async ({ page }) => 
   await page.getByRole("button", { name: "Explain" }).click();
   await expect(page.getByRole("region", { name: "Verdict" })).toBeVisible();
   await expectMarked(page, "Explain's report", [
-    `accepted by rule ${PROD_RULE}`,
+    "analytics",
     "the rule is for environment 'dev', not 'prod'",
   ]);
   expectOnlyStubbed(paths, [...STUBBED, ...CI_TRUST_STUBBED]);

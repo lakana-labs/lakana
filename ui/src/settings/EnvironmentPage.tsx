@@ -74,10 +74,10 @@ const DeleteEnvironmentDialog: ComponentType<DeleteEnvironmentDialogProps> = laz
   default: (await import("./EnvironmentDialogs")).DeleteEnvironmentDialog,
 }));
 
-// Leftover directories load on their own, only for those who manage environments on the instance.
 // The deployments and their run-as accounts load on their own, with their dialogs.
 const RunAsPanel = lazy(async () => ({ default: (await import("./RunAsPanel")).RunAsPanel }));
 
+// Leftover directories load on their own, only for those who manage environments on the instance.
 const LeftoverDirectories = lazy(async () => ({
   default: (await import("./LeftoverDirectories")).LeftoverDirectories,
 }));

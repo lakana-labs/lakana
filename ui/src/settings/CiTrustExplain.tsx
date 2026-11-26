@@ -36,13 +36,33 @@ const P = "settings.ciTrust.explain";
 /** A JSON Web Token: three dot-separated base64url parts, the first a JSON header. */
 const TOKEN = /^eyJ[\w-]*\.[\w-]+\.[\w-]*$/;
 
+/** A JSON Web Token anywhere inside a text, such as a value that carries one. */
+const TOKEN_INSIDE = /eyJ[\w-]*\.[\w-]+\.[\w-]*/;
+
+/**
+ * Whether a parsed value holds a token anywhere: in a text, a key, a list or an object inside.
+ *
+ * @param value - The value.
+ * @returns The answer.
+ */
+function holdsToken(value: unknown): boolean {
+  if (typeof value === "string") return TOKEN_INSIDE.test(value);
+  if (Array.isArray(value)) return value.some(holdsToken);
+  if (typeof value === "object" && value !== null) {
+    return Object.entries(value).some(
+      ([key, inner]) => TOKEN_INSIDE.test(key) || holdsToken(inner),
+    );
+  }
+  return false;
+}
+
 /** Why pasted claims are not sent, in words. */
 class ClaimsProblem extends Error {}
 
 /** The claims as parsed, or the key of why they cannot be sent. */
 type Parsed =
   | { readonly claims: Readonly<Record<string, unknown>> }
-  | { readonly problem: "notJson" | "notObject" | "looksLikeToken" };
+  | { readonly problem: "notJson" | "notObject" | "looksLikeToken" | "holdsToken" };
 
 /**
  * Reads the pasted claims: one JSON object, never a token.
@@ -59,9 +79,12 @@ function parseClaims(text: string): Parsed {
   } catch {
     return { problem: "notJson" };
   }
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? { claims: value as Record<string, unknown> }
-    : { problem: "notObject" };
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { problem: "notObject" };
+  }
+  return holdsToken(value)
+    ? { problem: "holdsToken" }
+    : { claims: value as Record<string, unknown> };
 }
 
 /** Properties of {@link Report}. */
@@ -90,6 +113,11 @@ function Report({ report, names }: ReportProps): JSX.Element {
     heading.current?.focus();
   }, [report]);
   const accepted = report.verdict.startsWith("accepted");
+  // The pill says accepted or refused, so the sentence beside it leaves that word out; an
+  // accepting rule is named as in the list below.
+  const acceptor =
+    report.matching.length === 1 ? names.get(report.matching[0] as string) : undefined;
+  const sentence = report.verdict.replace(/^(accepted|refused:?)\s*/, "");
   return (
     <>
       <section className="flat-panel settings-panel" aria-labelledby={verdictId}>
@@ -100,7 +128,11 @@ function Report({ report, names }: ReportProps): JSX.Element {
           <span className={`pill ${accepted ? "pill-ok" : "pill-bad"}`}>
             {accepted ? t(`${P}.accepted`) : t(`${P}.refused`)}
           </span>{" "}
-          <VisibleText text={report.verdict} />
+          {accepted && acceptor !== undefined ? (
+            t(`${P}.acceptedBy`, { name: acceptor })
+          ) : (
+            <VisibleText text={sentence} />
+          )}
         </p>
         <p className="page-purpose">
           {t(`${P}.compared`, {

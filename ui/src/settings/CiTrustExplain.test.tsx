@@ -71,7 +71,9 @@ describe("CiTrustExplain", () => {
 
     const verdict = await screen.findByRole("region", { name: "Verdict" });
     expect(within(verdict).getByText("Accepted")).toBeInTheDocument();
-    expect(verdict).toHaveTextContent(`accepted by rule ${PROD_RULE}`);
+    // The pill says Accepted; the sentence names the rule as the list does, and says it once.
+    expect(verdict).toHaveTextContent("Accepted by the rule analytics to prod.");
+    expect(verdict).not.toHaveTextContent(/accepted accepted/i);
     expect(verdict).toHaveTextContent(
       "Issuer GitHub Actions, environment prod, repository analytics.",
     );
@@ -108,6 +110,9 @@ describe("CiTrustExplain", () => {
 
     const verdict = await screen.findByRole("region", { name: "Verdict" });
     expect(within(verdict).getByText("Refused")).toHaveClass("pill-bad");
+    expect(verdict).toHaveTextContent(
+      "Refused no enabled rule for this issuer, environment and repository matches",
+    );
     expect(screen.getByText("a rule deleted since")).toBeInTheDocument();
     expect(server.sent.find((request) => request.method === "POST")?.body).toEqual({
       claims: { ref: "refs/heads/main" },
@@ -133,6 +138,23 @@ describe("CiTrustExplain", () => {
     await user.paste("eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJ4In0.c2lnbmF0dXJl");
     await user.click(screen.getByRole("button", { name: "Explain" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("looks like an ID token");
+
+    // A token inside a value, however deep, is refused too.
+    for (const pasted of [
+      JSON.stringify({
+        ref: "refs/heads/main",
+        id_token: "eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJ4In0.c2ln",
+      }),
+      JSON.stringify({ env: [{ ACTIONS_ID_TOKEN: "Bearer eyJhbGciOiJ9.eyJ4IjoxfQ.c2ln" }] }),
+      JSON.stringify({ "eyJhbGciOiJ9.eyJ4IjoxfQ.c2ln": "key" }),
+    ]) {
+      await user.clear(screen.getByRole("textbox", { name: "Claims" }));
+      await user.paste(pasted);
+      await user.click(screen.getByRole("button", { name: "Explain" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "A value of these claims looks like a token",
+      );
+    }
 
     expect(server.sent.filter((request) => request.method === "POST")).toEqual([]);
   });
