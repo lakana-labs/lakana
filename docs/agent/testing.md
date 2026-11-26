@@ -1308,8 +1308,8 @@ five).
   must have words for; a test reading another file outside `ui/` adds it there), writes one
   violation per gate (an unsafe `any`, a conditional hook, an
   image without alt text, an undocumented export, a `fetch`, `window.fetch`, `navigator.sendBeacon`
-  or `axios` outside `src/api/`, `process` and `Buffer` in `src/`, words and an `aria-label`
-  written in a component, bad formatting, three type
+  or `axios` outside `src/api/`, `process` and `Buffer` in `src/`, words, an `aria-label`
+  and an own component's `heading` written in a component, bad formatting, three type
   errors, an import out of `src/api/` and a cycle, an unused file, an untested branch, a size limit
   of 1 B, an 80-token copy), runs the gate and requires it to fail with the expected message; four
   probes check the other way round: that a `fetch` inside `src/api/` and words in a test are accepted, that a file whose

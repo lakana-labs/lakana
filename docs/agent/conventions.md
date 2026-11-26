@@ -290,18 +290,30 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   (the table page: `ui/src/catalog/table/table.en.json` and `tableStrings.ts`), so they stay out
   of the first load; a string the first load shows (a skeleton's, an error's) stays in `en.json`.
   ESLint's local rule `lakana/no-literal-text` (`ui/build/no-literal-text.ts`) enforces it in
-  every `.tsx` file of `ui/src/` but the tests: it fails on JSX text with a letter in it (any
-  script), a string or template literal with a letter as a JSX child, and the same as the value
-  of an attribute a person reads or hears (`aria-label`, `aria-description`,
-  `aria-roledescription`, `aria-valuetext`, `aria-placeholder`, `title`, `placeholder`, `alt`,
-  and the props `label`, `description`, `errorMessage`, `textValue`), each also as a branch of
-  `?:`, `&&` or `||`. Glyphs and punctuation (`·`, `—`, `→`, `×`) pass, and so does every
-  attribute no one reads (`className`, `data-testid`, `key`, `style`, `id`, `href`, `type`).
-  `ui/scripts/lint-ban.test.ts` lints one fixture per form (`ui/scripts/lint-fixtures/text-*.tsx`)
-  and expects exactly one error each, and none for `text-allowed.tsx`. The escape hatch, for
-  text that is no sentence of the interface and the same in every language (a product
-  name in a logo), is a disable comment on that one line with the reason after
-  `--`: `// eslint-disable-next-line lakana/no-literal-text -- why`, or
+  every `.tsx` file of `ui/src/` but the tests. It fails on JSX text with a letter in it (any
+  script), on a string or template literal with a letter as a JSX child, and on the same as the
+  value of an attribute a person reads or hears, each also inside `?:`, `&&`, `||` or a `+`
+  join. The watched attributes (`READ_ATTRIBUTES`) are the browser's and React Aria's
+  (`aria-label`, `title`, `placeholder`, `alt`, `label`, `description`, `textValue`, …) and
+  the props of the interface's own components that render the text they get (`heading`,
+  `message`, `term`, `copyLabel`, `waiting`, `region`, `help`, `empty`, `confirmLabel`, …).
+  `ui/build/no-literal-text.test.ts` collects every prop of `ui/src` that is given `t()` text
+  and fails unless it is watched or named in `NOT_READ` for its component with the reason
+  (`CopyLine`'s `text` is a command to copy, the same in every language): a new component
+  whose prop shows words adds that prop to `READ_ATTRIBUTES` in the same pull request. Glyphs and
+  punctuation (`·`, `—`, `→`, `×`) pass, and so does every attribute no one reads (`className`,
+  `data-testid`, `key`, `style`, `id`, `href`, `type`). `ui/scripts/lint-ban.test.ts` lints one
+  fixture per form (`ui/scripts/lint-fixtures/text-*.tsx`) and expects exactly one error each,
+  and none for `text-allowed.tsx` and `text-copy-command.tsx`.
+  **What it does not reach**, so review still checks it: words written in a `.ts` file (a
+  sentence built in `health.ts`, `deletion.ts`, `schedule.ts` or `tour/steps.ts`, a `return
+  "never"`); a map of labels (`const LABELS = { running: "Running" }` shown as
+  `{LABELS[state]}`); a constant passed to an attribute (`aria-label={CLOSE}`); words given to a
+  function rather than a prop (`setNote("Saved")`, a toast); and an English fallback given to
+  `t()` (`t("key", "Fallback words")` or `defaultValue`), which a translation never replaces
+  where the key is missing. The escape hatch, for text that is no sentence of the interface and
+  the same in every language (a product name in a logo), is a disable comment on that one line
+  with the reason after `--`: `// eslint-disable-next-line lakana/no-literal-text -- why`, or
   `{/* eslint-disable-next-line lakana/no-literal-text -- why */}` inside JSX. Never disable it
   for a file. An unused disable comment fails the lint (a warning, and the lint allows none).
 - **Numbers in a message are written for the language.** i18next calls `localeNumbers`
@@ -311,7 +323,8 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   `{{seconds, number(minimumFractionDigits: 1; maximumFractionDigits: 1)}} s`; `number` is the
   only format (`i18n.test.ts` checks every catalogue). Pass the number, never `toFixed` or
   `String(n)` of an amount; a number that is a name rather than an amount (an artifact's version,
-  a port) is passed as a string so its digits stay as they are. A message holds the whole
+  a port, a line and column in a file) is passed as a string so its digits stay as they are.
+  A message holds the whole
   sentence with its numbers, never a fragment to append (the Preview line has a key with the time
   and one without).
 - **Licences.** The npm locks are checked like the Python one. The MPL-2.0 development tools
