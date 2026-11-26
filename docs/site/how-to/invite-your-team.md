@@ -50,8 +50,8 @@ person then sees why, and another administrator issues a new one.
 The invite proves only that someone opened the link. Before you grant the new account anything,
 confirm **outside Lakana** that the person who signed up is the person you invited: ask them in
 person, by phone or in your team chat whether they just joined. If they did not, a stranger holds
-the account: deactivate it (`principal deactivate` in the [CLI reference](../reference/cli.md))
-and invite the person again.
+the account: deactivate it (on its page under **Settings → Access → People**, **Deactivate**, or
+`principal deactivate` in the [CLI reference](../reference/cli.md)) and invite the person again.
 
 Then grant the smallest set of rights they need. The roles and the commands are in
 [Give a second person access](give-a-second-person-access.md#grant-the-smallest-set); a new

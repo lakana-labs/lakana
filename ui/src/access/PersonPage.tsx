@@ -1,10 +1,10 @@
 /**
  * A person in Settings › Access › People: their picture, their link to the identity provider,
- * their passkeys and sessions, and the way back in when they lost their passkeys.
+ * their passkeys and sessions, the way back in when they lost their passkeys, and Deactivate.
  *
  * @packageDocumentation
  */
-import { type JSX, lazy, Suspense, useCallback, useState } from "react";
+import { type JSX, lazy, type ReactNode, Suspense, useCallback, useId, useState } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
@@ -21,10 +21,19 @@ import { OwnRecoveryNote } from "../sign-in/OwnRecoveryNote";
 import { PasskeysPanel } from "../sign-in/PasskeysPanel";
 import { SessionsPanel } from "../sign-in/SessionsPanel";
 import { useSession } from "../sign-in/SessionProvider";
+import type { DeactivatedKind } from "./DeactivateDialog";
+import "./principalStrings";
+import { InstanceManagedNote, managedInstance } from "./InstanceManaged";
 import { ProviderLink } from "./ProviderLink";
 import { RecoveryDialog } from "./RecoveryDialog";
+import { useAccessStatus } from "./useAccessStatus";
 import { markedText } from "../shell/VisibleText";
 import "../settings/settingsStrings";
+
+// Deactivate's question loads when it is opened.
+const DeactivateDialog = lazy(async () => ({
+  default: (await import("./DeactivateDialog")).DeactivateDialog,
+}));
 
 // The grants and groups load with Access's other places, not with People.
 const PersonGrants = lazy(() =>
@@ -42,6 +51,8 @@ interface About {
   readonly picture: string | null;
   /** Their link to the identity provider, or null when they are not linked (or it is unknown). */
   readonly link: ProviderLinkOut | null;
+  /** Whether the account is active; null when the principal could not be read. */
+  readonly active: boolean | null;
 }
 
 /**
@@ -57,14 +68,16 @@ async function aboutOther(name: string): Promise<About> {
   const principal = await getPrincipal(name).catch(() => null);
   const picture = principal?.picture ?? null;
   const link = principal?.provider_link ?? null;
+  const active = principal?.is_active ?? null;
   if (principal !== null && principal.type !== "USER") {
-    return { kind: "service", picture, link };
+    return { kind: "service", picture, link, active };
   }
-  return { kind: principal?.held_admin === true ? "admin" : "person", picture, link };
+  return { kind: principal?.held_admin === true ? "admin" : "person", picture, link, active };
 }
 
 /**
- * Finds out one's own link to the identity provider; the rest is known from the session.
+ * Finds out one's own link to the identity provider; the rest is known from the session (one is
+ * signed in, so active).
  *
  * @param name - One's own principal name.
  * @param picture - One's picture's etag, or null.
@@ -72,7 +85,84 @@ async function aboutOther(name: string): Promise<About> {
  */
 async function aboutOwn(name: string, picture: string | null): Promise<About> {
   const principal = await getPrincipal(name).catch(() => null);
-  return { kind: "own", picture, link: principal?.provider_link ?? null };
+  return { kind: "own", picture, link: principal?.provider_link ?? null, active: true };
+}
+
+/** Properties of {@link DeactivatePanel}. */
+interface DeactivatePanelProps {
+  /** The principal name. */
+  readonly name: string;
+  /** Opens the dialog. */
+  readonly onOpen: () => void;
+}
+
+/**
+ * Deactivate, at the end of the page: what it is for, and the button that asks first.
+ *
+ * @param props - The principal and the handler.
+ * @param props.name - The principal name.
+ * @param props.onOpen - Opens the dialog.
+ * @returns The panel.
+ */
+function DeactivatePanel({ name, onOpen }: DeactivatePanelProps): JSX.Element {
+  const { t } = useTranslation();
+  const id = useId();
+  return (
+    <section className="flat-panel" aria-labelledby={id}>
+      <h2 id={id} className="panel-title">
+        {t("access.deactivate.title")}
+      </h2>
+      <p className="page-purpose">{t("access.deactivate.intro")}</p>
+      <Button
+        className="button"
+        aria-label={t("access.deactivate.actionOf", { name })}
+        onPress={onOpen}
+      >
+        {t("access.deactivate.action")}
+      </Button>
+    </section>
+  );
+}
+
+/** Properties of {@link UnlessManaged}. */
+interface UnlessManagedProps {
+  /** The service account's name, for the emergency command. */
+  readonly name: string;
+  /** What to show while no access file manages the instance. */
+  readonly children: ReactNode;
+}
+
+/**
+ * Shows a service account's Deactivate only once the access files' status is read and no file
+ * manages the instance (a managed instance lists its service accounts); otherwise the note that
+ * names the file and the emergency command, or why the status could not be read.
+ *
+ * @param props - The name and what to show.
+ * @param props.name - The service account's name.
+ * @param props.children - What to show while no file manages the instance.
+ * @returns The panel, the note or nothing.
+ */
+function UnlessManaged({ name, children }: UnlessManagedProps): ReactNode {
+  const { t } = useTranslation();
+  const status = useAccessStatus();
+  if (managedInstance(status) === null) return children;
+  return (
+    <InstanceManagedNote
+      status={status}
+      commands={[t("access.deactivate.command", { name })]}
+      onRetry={status.reload}
+    />
+  );
+}
+
+/**
+ * What a deactivation ends, by whose account it is.
+ *
+ * @param kind - The kind of account, as far as recovering it goes.
+ * @returns The kind the dialog names.
+ */
+function deactivatedKind(kind: Kind): DeactivatedKind {
+  return kind === "own" || kind === "service" ? kind : "person";
 }
 
 /** Properties of {@link PersonPage}. */
@@ -87,7 +177,10 @@ export interface PersonPageProps {
  * menu). For anyone who holds or has held ADMIN the
  * page shows the server operator's command instead, for a service account a line saying it signs
  * in with its token, and for oneself no button (Add a passkey is the way) but, for an
- * administrator, the operator's command that lets them back in.
+ * administrator, the operator's command that lets them back in. Deactivate stands at the end of
+ * the page for an active account (a service account's only while no access file manages the instance): after it
+ * the page is read again and says so, its sessions are read again, and the focus goes to the
+ * heading; on one's own page the session is read again, which signs one out.
  *
  * @param props - The person.
  * @param props.name - The person's principal name.
@@ -96,7 +189,8 @@ export interface PersonPageProps {
 export function PersonPage({ name }: PersonPageProps): JSX.Element {
   const { t } = useTranslation();
   // The areas are behind the gate, so a session is there.
-  const own = name === (useSession().session as SessionOut).name;
+  const session = useSession();
+  const own = name === (session.session as SessionOut).name;
   const me = useMe();
   const load = useCallback(
     async (): Promise<About> => (own ? aboutOwn(name, me.picture) : aboutOther(name)),
@@ -108,7 +202,10 @@ export function PersonPage({ name }: PersonPageProps): JSX.Element {
   const picture = useCurrentPicture(name, about?.picture ?? null);
   const [recovering, setRecovering] = useState(false);
   const [removing, setRemoving] = useState(false);
-  // An unlink deletes the passkeys and ends the sessions: the panels read them again.
+  const [deactivating, setDeactivating] = useState(false);
+  const [note, setNote] = useState("");
+  // An unlink deletes the passkeys and ends the sessions, and so does a deactivation: the panels
+  // read them again.
   const [unlinked, setUnlinked] = useState(0);
   // The button that opened the confirmation is gone once the picture or the link is: focus the
   // heading.
@@ -123,7 +220,8 @@ export function PersonPage({ name }: PersonPageProps): JSX.Element {
         { to: "/settings/access/people", label: t("settings.places.people") },
       ]}
       action={
-        kind === "person" && (
+        kind === "person" &&
+        about?.active !== false && (
           <Button
             className="button button-primary"
             onPress={() => {
@@ -137,6 +235,9 @@ export function PersonPage({ name }: PersonPageProps): JSX.Element {
     >
       <div className="person-picture">
         <Avatar name={name} displayName={null} etag={picture} size={48} />
+        {about?.active === false && (
+          <span className="pill pill-warn">{t("access.deactivate.state")}</span>
+        )}
         {!own && picture !== null && (
           <Button
             className="button"
@@ -148,6 +249,12 @@ export function PersonPage({ name }: PersonPageProps): JSX.Element {
           </Button>
         )}
       </div>
+      <p className="step-status" role="status">
+        {note}
+      </p>
+      {about?.active === false && (
+        <p className="page-purpose">{t("access.deactivate.note", { name: markedText(name) })}</p>
+      )}
       {kind === "service" && (
         <p className="page-purpose">{t("access.people.serviceNote", { name: markedText(name) })}</p>
       )}
@@ -180,6 +287,47 @@ export function PersonPage({ name }: PersonPageProps): JSX.Element {
       )}
       <PasskeysPanel key={`passkeys-${String(unlinked)}`} name={name} own={own} />
       <SessionsPanel key={`sessions-${String(unlinked)}`} name={name} own={own} />
+      {about?.active === true &&
+        (kind === "service" ? (
+          <UnlessManaged name={name}>
+            <DeactivatePanel
+              name={name}
+              onOpen={() => {
+                setDeactivating(true);
+              }}
+            />
+          </UnlessManaged>
+        ) : (
+          <DeactivatePanel
+            name={name}
+            onOpen={() => {
+              setDeactivating(true);
+            }}
+          />
+        ))}
+      {deactivating && kind !== undefined && (
+        <Suspense fallback={null}>
+          <DeactivateDialog
+            name={name}
+            kind={deactivatedKind(kind)}
+            onCancel={() => {
+              setDeactivating(false);
+            }}
+            onDone={() => {
+              setDeactivating(false);
+              if (own) {
+                // One's own session ended with the account: reading it again signs one out.
+                void session.refresh();
+                return;
+              }
+              setNote(t("access.deactivate.done", { name }));
+              focus.arm();
+              setUnlinked((count) => count + 1);
+              read.reload();
+            }}
+          />
+        </Suspense>
+      )}
       {removing && (
         <ConfirmDialog
           title={t("profile.removeTitle", { name: markedText(name) })}

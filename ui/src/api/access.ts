@@ -66,7 +66,7 @@ export interface OpenRecoveryLinkOut {
 export interface PrincipalOut {
   /** The principal name. */
   readonly name: string;
-  /** `USER` for a person, `SERVICE` for a service account. */
+  /** `USER` for a person, `SERVICE_ACCOUNT` for a service account. */
   readonly type: string;
   /** False for a deactivated principal. */
   readonly is_active: boolean;
