@@ -14,6 +14,11 @@ describe("localeNumbers", () => {
     expect(localeNumbers.format(7, undefined, undefined)).toBe(new Intl.NumberFormat().format(7));
   });
 
+  it("takes true and false in a format's options as booleans", () => {
+    expect(localeNumbers.format(5_432, "number(useGrouping: false)", "en")).toBe("5432");
+    expect(localeNumbers.format(5_432, "number(useGrouping: true)", "de")).toBe("5.432");
+  });
+
   it("leaves a value that is not a number as it is", () => {
     expect(localeNumbers.format("v12400", undefined, "en")).toBe("v12400");
     expect(localeNumbers.format(undefined, undefined, "en")).toBeUndefined();

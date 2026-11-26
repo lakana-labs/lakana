@@ -8,6 +8,12 @@ import type { FormatterModule } from "i18next";
 /** The formatters made so far, by language and format, since a page may write thousands. */
 const made = new Map<string, Intl.NumberFormat>();
 
+/** The words of a boolean option, such as `useGrouping: false`. */
+const BOOLEANS = new Map([
+  ["true", true],
+  ["false", false],
+]);
+
 /**
  * The options of a format such as `number(minimumFractionDigits: 1; maximumFractionDigits: 1)`.
  *
@@ -15,10 +21,11 @@ const made = new Map<string, Intl.NumberFormat>();
  * @returns The options for `Intl.NumberFormat`.
  */
 function parseOptions(options: string | undefined): Intl.NumberFormatOptions {
-  const parsed: Record<string, string | number> = {};
+  const parsed: Record<string, string | number | boolean> = {};
   for (const option of (options ?? "").split(";")) {
     const [name = "", value = ""] = option.split(":").map((part) => part.trim());
-    if (name !== "") parsed[name] = /^\d+$/.test(value) ? Number(value) : value;
+    if (name !== "")
+      parsed[name] = BOOLEANS.get(value) ?? (/^\d+$/.test(value) ? Number(value) : value);
   }
   return parsed;
 }

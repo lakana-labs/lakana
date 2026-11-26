@@ -61,7 +61,7 @@ export function DefinedIn({ place }: DefinedInProps): JSX.Element | null {
             </>
           }
         />
-        {t("table.definedIn.line", { line: where.line })}
+        {t("table.definedIn.line", { line: String(where.line) })}
         <span aria-hidden="true"> · </span>
         <VisibleText text={where.commit.slice(0, SHORT_COMMIT)} />
         {where.link !== null && (

@@ -107,6 +107,16 @@ describe("DefinedIn", () => {
     expect(await definedIn()).toHaveTextContent("models/gold/fact_sales.sql, line 1");
   });
 
+  it("writes the line as its digits, as an editor shows it", async () => {
+    renderShell(PAGE, {
+      routes: {
+        [`GET ${TABLE_PATH}/definition`]: { status: 200, body: { ...DEFINITION, line: 1234 } },
+      },
+    });
+
+    expect(await definedIn()).toHaveTextContent("models/gold/fact_sales.sql, line 1234");
+  });
+
   it("links to the git host only for an https link", async () => {
     const { user } = renderShell(PAGE);
 
