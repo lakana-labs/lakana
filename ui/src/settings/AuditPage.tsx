@@ -12,7 +12,7 @@
  */
 import { type JSX, useCallback, useEffect, useId, useRef, useState } from "react";
 import { Button } from "react-aria-components";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import { type AuditEventOut, type AuditFilter, listAuditEvents } from "../api/audit";
@@ -301,7 +301,15 @@ function AuditRow({ event, when }: AuditRowProps): JSX.Element {
         </td>
         <td>
           <span className="audit-type">
-            {event.event_type === "UNKNOWN" ? type : <VisibleText text={type} />}
+            {event.event_type === "UNKNOWN" ? (
+              <Trans
+                t={t}
+                i18nKey="settings.audit.unknownType"
+                components={{ type: <VisibleText text={event.event_type_raw} /> }}
+              />
+            ) : (
+              <VisibleText text={type} />
+            )}
           </span>
         </td>
         <td>

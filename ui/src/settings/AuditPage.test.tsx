@@ -142,6 +142,20 @@ describe("AuditPage", () => {
     expect(within(query).queryByRole("term")).not.toBeInTheDocument();
   });
 
+  it("shows the stored type of an event this release does not know, with its hidden characters", async () => {
+    const unknown = anEvent("u1", {
+      event_type: "UNKNOWN",
+      event_type_raw: "WIDGET‮FROBNICATED",
+      detail: {},
+    });
+    renderShell(PATH, { routes: answering([unknown]) });
+    const region = await events();
+
+    const type = within(region).getByText(/not known to this release/);
+    expect(type).toHaveTextContent("WIDGETU+202EFROBNICATED (not known to this release)");
+    expect(type.querySelectorAll(".char-mark")).toHaveLength(1);
+  });
+
   it("sorts by When on the server, the oldest first, and keeps it in the address", async () => {
     const { server, user, router } = renderShell(PATH, { routes: answering() });
     const region = await events();

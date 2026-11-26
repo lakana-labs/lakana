@@ -98,6 +98,10 @@ at first). The filters and the order stay in the page's address, so a link opens
 
 The page shows what the server sends and keeps nothing; to keep the log, export it as below.
 
+The page is listed only for an administrator. Someone who holds `READ_AUDIT_LOG` and nothing
+more, such as the `auditor` account above, does not get it and reads the log with
+`lakana audit list` or `GET /api/v1/audit-events`.
+
 ## Export the log
 
 `lakana audit list` pages through the events, newest first. With `--output json` each event

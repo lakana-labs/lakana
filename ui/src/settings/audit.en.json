@@ -30,6 +30,7 @@
   "nothing": "Nothing",
   "instance": "The instance",
   "unknown": "{{type}} (not known to this release)",
+  "unknownType": "<type/> (not known to this release)",
   "showDetails": "Show details",
   "hideDetails": "Hide details",
   "detailsOf": "Show details of {{type}} at {{when}}",
