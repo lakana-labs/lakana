@@ -15,6 +15,7 @@ export type SettingsPlaceId =
   | "status"
   | "environments"
   | "repositories"
+  | "ci-trust"
   | "access"
   | "people"
   | "groups"
@@ -106,7 +107,7 @@ export interface SettingsPlace {
  * Every place, in list order.
  *
  * @remarks
- * The spec's full order is: Status, Environments, Repositories, Access (People, Groups, Grants,
+ * The spec's full order is: Status, Environments, Repositories, CI trust, Access (People, Groups, Grants,
  * Tokens, Secrets, Row filters & masks, Access file, What I may do), Sign-in (Invites, Recovery
  * links), Configuration. A new place is one entry here, at its place in that order, plus its
  * loader in `placePages.ts` (kept literal, `as const`, so that file can tell the pages from the
@@ -149,6 +150,15 @@ export const SETTINGS_PLACES = [
         ? null
         : viewer.readsEnvironments || manages;
     },
+  },
+  {
+    id: "ci-trust",
+    path: "ci-trust",
+    label: "settings.places.ciTrust",
+    parent: null,
+    kind: "page",
+    below: true,
+    visible: (viewer) => viewer.admin,
   },
   {
     id: "access",

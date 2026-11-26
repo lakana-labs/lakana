@@ -8,6 +8,7 @@ import { expect, type Locator, type Page } from "@playwright/test";
 
 import { stubAccess, stubPolicies, stubSignInAndConfiguration, stubTokensSecrets } from "../access";
 import { stubArtifacts } from "../artifacts";
+import { PROD_RULE, stubCiTrust } from "../ciTrust";
 import { stubConnect } from "../connect";
 import { stubConnections } from "../connections";
 import { stubEnvironments } from "../environments";
@@ -745,6 +746,63 @@ export const SHOTS: readonly Shot[] = [
     stub: admin(stubConnect),
     path: "/settings/repositories/new",
     ready: (page) => page.getByRole("textbox", { name: "Repository URL" }),
+  },
+  {
+    name: "settings-ci-trust",
+    stub: admin(stubCiTrust),
+    path: "/settings/ci-trust",
+    ready: text("ci-prod"),
+    phone: true,
+  },
+  {
+    name: "settings-ci-trust-add",
+    stub: admin(stubCiTrust),
+    path: "/settings/ci-trust",
+    ready: text("ci-prod"),
+    act: dialog("Add rule"),
+  },
+  {
+    name: "settings-ci-trust-rule",
+    stub: admin(stubCiTrust),
+    path: `/settings/ci-trust/${PROD_RULE}`,
+    ready: text("refs/heads/main"),
+  },
+  {
+    name: "settings-ci-trust-rule-managed",
+    stub: admin((page) => stubCiTrust(page, ["prod"])),
+    path: `/settings/ci-trust/${PROD_RULE}`,
+    ready: text(/is managed by/),
+  },
+  {
+    name: "settings-ci-trust-edit",
+    stub: admin(stubCiTrust),
+    path: `/settings/ci-trust/${PROD_RULE}`,
+    ready: text("refs/heads/main"),
+    act: dialog(/^Edit the rule for analytics/),
+  },
+  {
+    name: "settings-ci-trust-explain",
+    stub: admin(stubCiTrust),
+    path: "/settings/ci-trust/explain",
+    ready: heading("Explain a CI job's claims"),
+    act: async (page) => {
+      await page
+        .getByRole("textbox", { name: "Claims" })
+        .fill('{"iss": "https://token.actions.githubusercontent.com", "ref": "refs/heads/main"}');
+      await page.getByRole("button", { name: /^Environment/ }).click();
+      await page.getByRole("option", { name: /^prod/ }).click();
+      await page.getByRole("button", { name: /^Repository/ }).click();
+      await page.getByRole("option", { name: "analytics" }).click();
+      await page.getByRole("button", { name: "Explain" }).click();
+      await expect(page.getByRole("region", { name: "Every rule" })).toBeVisible();
+    },
+  },
+  {
+    name: "settings-environment-run-as",
+    stub: admin(stubEnvironments),
+    path: "/settings/environments/prod",
+    ready: text("etl-prod"),
+    act: dialog(/^Change the run-as account of analytics/),
   },
   {
     name: "settings-people",

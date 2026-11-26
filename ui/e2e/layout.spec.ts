@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 
 import { stubAccess, stubPolicies, stubSignInAndConfiguration, stubTokensSecrets } from "./access";
+import { PROD_RULE, stubCiTrust } from "./ciTrust";
 import { PROD, stubConnections, WAREHOUSE } from "./connections";
 import { stubEnvironments } from "./environments";
 import { FAILED_ID, stubJobs, TIMED_OUT } from "./jobs";
@@ -278,6 +279,15 @@ const DETAILS: readonly {
     to: "/settings/environments/prod",
   },
   {
+    name: "a CI trust rule",
+    stub: async (page) => {
+      await signInAsAdmin(page);
+      await stubCiTrust(page);
+    },
+    from: "/settings/ci-trust",
+    to: `/settings/ci-trust/${PROD_RULE}`,
+  },
+  {
     name: "a group",
     stub: async (page) => {
       await signInAsAdmin(page);
@@ -367,6 +377,7 @@ const TOOLBARS: readonly [string, (page: Page) => Promise<unknown>, string, bool
   ["Deploys", stubJobs, "/jobs/deploys", true],
   ["Environments", admin(stubEnvironments), "/settings/environments", true],
   ["Repositories", admin(stubRepositories), "/settings/repositories", true],
+  ["CI trust", admin(stubCiTrust), "/settings/ci-trust", true],
   ["People", admin(stubAccess), "/settings/access", true],
   ["Groups", admin(stubAccess), "/settings/access/groups", true],
   ["Grants", admin(stubAccess), "/settings/access/grants", true],

@@ -35,6 +35,13 @@ export const PLACE_PAGES: Record<PagePlaceId, () => Promise<ComponentType>> = {
    */
   repositories: async () => (await import("./RepositoriesRoutes")).RepositoriesRoutes,
   /**
+   * CI trust: the rules that let CI jobs deploy with their ID token, each rule's page, and
+   * Explain a CI job's claims.
+   *
+   * @returns The page.
+   */
+  "ci-trust": async () => (await import("./CiTrustRoutes")).CiTrustRoutes,
+  /**
    * People, with a person's page below it.
    *
    * @returns The page.

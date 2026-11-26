@@ -69,6 +69,14 @@ Why each condition is there:
 
 The full list of rules and conditions is in [CI trust rules and CI tokens](../reference/ci-trust-rules.md).
 
+In the web interface, an administrator adds the same rules under **Settings › CI trust** with
+**Add rule**: choose GitLab.com (or **Another issuer** with your GitLab's URL), the environment, the
+repository and the account it acts as, and complete the claims. The form starts with `project_id`
+(left empty for your project's number), `ref=main` and `ref_protected=true`; **Add a claim** adds
+`environment` or `pipeline_source`. Saving asks for a passkey touch first. The last step of
+**Connect a repository** links to the same form, filled in for the repository it connected. Each
+rule's page shows its claims, with **Edit**, **Disable** (or **Enable**) and **Delete rule**.
+
 ## 3. Add the pipeline
 
 `lakana init` writes this file as `.gitlab-ci.yml`, with your repository's name and your CLI's
@@ -281,6 +289,11 @@ Verdict: accepted by rule 3fb34c95-1bb1-4979-968e-99aa864322c4
 ```
 
 A rule that does not match lists each claim it disagrees with.
+
+In the web interface, **Explain a CI job's claims** under **Settings › CI trust** does the same:
+paste the claims (the JSON above, never the token itself), choose the environment and the
+repository, and press **Explain**. It shows the verdict and why each rule does or does not match,
+and records nothing.
 
 ## From Python
 

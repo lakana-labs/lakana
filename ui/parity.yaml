@@ -50,14 +50,14 @@
 "bundle init": { class: git, reason: "local deployment tooling (compose.yaml, .env)" }
 "check list": { class: read, part: 5 }
 "check rows": { class: ui, part: 5, done: true }
-"ci-trust create": { class: ui, part: 7 }
-"ci-trust delete": { class: ui, part: 7 }
-"ci-trust disable": { class: ui, part: 7 }
-"ci-trust enable": { class: ui, part: 7 }
-"ci-trust explain": { class: ui, part: 7 }
-"ci-trust list": { class: ui, part: 7 }
-"ci-trust show": { class: ui, part: 7 }
-"ci-trust update": { class: ui, part: 7 }
+"ci-trust create": { class: ui, part: 7, done: true }
+"ci-trust delete": { class: ui, part: 7, done: true }
+"ci-trust disable": { class: ui, part: 7, done: true }
+"ci-trust enable": { class: ui, part: 7, done: true }
+"ci-trust explain": { class: ui, part: 7, done: true }
+"ci-trust list": { class: ui, part: 7, done: true }
+"ci-trust show": { class: ui, part: 7, done: true }
+"ci-trust update": { class: ui, part: 7, done: true }
 "column-mask create": { class: ui, part: 7, done: true }
 "column-mask list": { class: ui, part: 7, done: true }
 "column-mask revoke": { class: ui, part: 7, done: true }
@@ -70,7 +70,7 @@
 "connection update": { class: ui, part: 6, done: true }
 "deploy": { class: git, reason: "deploy of a new commit" }
 "deployments list": { class: read, part: 5, done: true }
-"deployments set-run-as": { class: ui, part: 7 }
+"deployments set-run-as": { class: ui, part: 7, done: true }
 "deploys list": { class: read, part: 5, done: true }
 "deploys show": { class: read, part: 5, done: true }
 "env create": { class: ui, part: 8, done: true }
@@ -254,14 +254,14 @@
 "undeploy": { class: ui, part: 5 }
 "whoami": { class: read, part: 1 }
 "worker list": { class: ui, part: 8, done: true }
-"DELETE /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7 }
+"DELETE /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7, done: true }
 "DELETE /api/v1/column-masks/{column_mask_id}": { class: ui, part: 7, done: true }
 "DELETE /api/v1/environments/{environment_name}/connections/{connection_name}":
   { class: ui, part: 6, done: true }
 "DELETE /api/v1/environments/{environment_name}/secrets/{secret_name}":
   { class: ui, part: 7, done: true }
 "DELETE /api/v1/environments/{env}/deployments/{repo}": { class: ui, part: 5 }
-"DELETE /api/v1/environments/{env}/deployments/{repo}/run-as": { class: ui, part: 7 }
+"DELETE /api/v1/environments/{env}/deployments/{repo}/run-as": { class: ui, part: 7, done: true }
 "DELETE /api/v1/environments/{env}/namespaces/{path}": { class: ui, part: 3, done: true }
 "DELETE /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}":
   { class: ui, part: 3, done: true }
@@ -301,8 +301,8 @@
   }
 "GET /api/v1/access/status": { class: read, part: 7, done: true }
 "GET /api/v1/audit-events": { class: ui, part: 8 }
-"GET /api/v1/ci-trust-rules": { class: ui, part: 7 }
-"GET /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7 }
+"GET /api/v1/ci-trust-rules": { class: ui, part: 7, done: true }
+"GET /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7, done: true }
 "GET /api/v1/column-masks":
   {
     class: ui,
@@ -499,7 +499,7 @@
     done: true,
     note: "Status lists them from the detail of GET /api/v1/status",
   }
-"PATCH /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7 }
+"PATCH /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7, done: true }
 "PATCH /api/v1/environments/{environment_name}/connections/{connection_name}":
   { class: ui, part: 6, done: true }
 "PATCH /api/v1/environments/{environment_name}/secrets/{secret_name}":
@@ -531,10 +531,10 @@
   { class: git, reason: "lakana login exchanges its one-time code (local tooling)" }
 "POST /api/v1/auth/oidc/token":
   { class: git, reason: "CI ID-token exchange (machine; CI workflow in Git)" }
-"POST /api/v1/ci-trust-rules": { class: ui, part: 7 }
-"POST /api/v1/ci-trust-rules/explain": { class: ui, part: 7 }
-"POST /api/v1/ci-trust-rules/{rule_id}/disable": { class: ui, part: 7 }
-"POST /api/v1/ci-trust-rules/{rule_id}/enable": { class: ui, part: 7 }
+"POST /api/v1/ci-trust-rules": { class: ui, part: 7, done: true }
+"POST /api/v1/ci-trust-rules/explain": { class: ui, part: 7, done: true }
+"POST /api/v1/ci-trust-rules/{rule_id}/disable": { class: ui, part: 7, done: true }
+"POST /api/v1/ci-trust-rules/{rule_id}/enable": { class: ui, part: 7, done: true }
 "POST /api/v1/column-masks": { class: ui, part: 7, done: true }
 "POST /api/v1/environments": { class: ui, part: 8, done: true }
 "POST /api/v1/environments/{environment_name}/connection-tests": { class: ui, part: 6, done: true }
@@ -653,7 +653,7 @@
   { class: exception, reason: "debugging tool; minted by the platform for running tasks" }
 "PUT /api/v1/environments/{environment_name}/secrets/{secret_name}/use":
   { class: ui, part: 7, done: true }
-"PUT /api/v1/environments/{env}/deployments/{repo}/run-as": { class: ui, part: 7 }
+"PUT /api/v1/environments/{env}/deployments/{repo}/run-as": { class: ui, part: 7, done: true }
 "PUT /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads/{upload_id}/blobs/{sha256}":
   { class: git, reason: "artifact upload" }
 "PUT /api/v1/environments/{env}/namespaces/{path}/tables/{name}/columns/{column}/description":

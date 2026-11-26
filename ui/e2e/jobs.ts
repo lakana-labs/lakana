@@ -764,6 +764,7 @@ async function stubDeploys(page: Page): Promise<void> {
         project_version_id: succeeded() ? VERSIONS.older : VERSIONS.current,
         commit_sha: succeeded() ? OLDER_COMMIT : CURRENT_COMMIT,
         updated_at: succeeded() ? "2026-11-17T11:00:30Z" : "2026-11-17T08:00:40Z",
+        run_as: "etl-prod",
       };
       return route.fulfill({ json: [current] });
     },

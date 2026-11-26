@@ -1,0 +1,121 @@
+/* Settings › CI trust: the rules scroll in their own region with a rule's name kept whole, a
+   self-hosted issuer's URL wraps inside its cell, and a rule's claims are code. */
+.list-scroll.ci-trust-scroll .list {
+  min-width: 760px;
+}
+
+.list-scroll.ci-trust-scroll .row-name {
+  overflow-wrap: normal;
+}
+
+.ci-trust-issuer {
+  overflow-wrap: anywhere;
+}
+
+.list-scroll.ci-trust-conditions-scroll .list {
+  min-width: 480px;
+}
+
+.ci-trust-conditions-scroll code {
+  overflow-wrap: anywhere;
+}
+
+/* The claims of a rule being added or edited: a fieldset without a frame, its legend in the
+   label's place, one row per claim (name, the text it must equal, Remove), the heads once above. */
+.ci-trust-conditions {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+
+.ci-trust-conditions legend,
+.ci-trust-form fieldset.field > legend {
+  padding: 0;
+}
+
+.ci-trust-form fieldset.field {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+
+.ci-trust-condition {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--control-gap);
+}
+
+.ci-trust-condition .field {
+  flex: 1 1 160px;
+  margin: 0;
+}
+
+.ci-trust-condition .field input {
+  width: 100%;
+  max-width: none;
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+}
+
+.ci-trust-condition-head {
+  color: var(--color-text-muted);
+  font-size: var(--type-label-size);
+  line-height: var(--type-label-line);
+}
+
+.ci-trust-condition-head span {
+  flex: 1 1 160px;
+}
+
+/* The head has no Remove: its place stays empty, as wide as the buttons below. */
+.ci-trust-condition-head::after {
+  content: "";
+  flex: 0 0 80px;
+}
+
+/* Explain: the pasted claims are code, typed in a monospace box that grows with them; the
+   rules' reasons are a list under each rule. */
+.field textarea.ci-trust-claims {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 160px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+  line-height: var(--type-code-line);
+}
+
+.field textarea.ci-trust-claims:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.ci-trust-explained {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ci-trust-explained > li {
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--color-line);
+}
+
+.ci-trust-explained > li:first-child {
+  border-top: 0;
+}
+
+.ci-trust-explained p {
+  margin: 0;
+}
+
+.ci-trust-explained ul {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-5);
+  color: var(--color-text-muted);
+}

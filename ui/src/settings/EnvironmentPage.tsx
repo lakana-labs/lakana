@@ -1,7 +1,7 @@
 /**
- * An environment's page in Settings › Environments: its storage, protection, retention and
- * properties; for those who manage it its usage; and for those who manage environments on the
- * instance its protection.
+ * An environment's page in Settings › Environments: its storage, protection, retention,
+ * properties and deployments with their run-as accounts; for those who manage it its usage and
+ * the run-as bindings; and for those who manage environments on the instance its protection.
  *
  * @remarks
  * The page is not polled: it is read once, and again after every change made here. Protecting
@@ -48,6 +48,7 @@ import { EnvironmentUsage } from "./EnvironmentUsage";
 import { managesEnvironment, mayCreateEnvironments } from "./places";
 import "./settingsStrings";
 import { storageSummary } from "./storageSummary";
+import { RunAsPanel } from "./RunAsPanel";
 import { useLeave } from "./useLeave";
 import { useReloadViewer, useSettingsViewer } from "./viewer";
 
@@ -439,6 +440,11 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
               protectButton={protectButton}
             />
             {manages && <EnvironmentUsage name={environment.name} paused={deleting} />}
+            <RunAsPanel
+              environment={environment.name}
+              isProtected={environment.is_protected}
+              manages={manages}
+            />
             {creates && (
               <StoragePanel
                 environment={environment}

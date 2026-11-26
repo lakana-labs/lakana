@@ -865,6 +865,12 @@ describe("ConnectRepository", () => {
       "href",
       "https://lakana-labs.github.io/lakana/how-to/deploy-from-github-actions/",
     );
+    expect(
+      screen.getByRole("link", { name: "Add a CI trust rule for analytics in dev" }),
+    ).toHaveAttribute(
+      "href",
+      "/settings/ci-trust?add=1&repository=analytics&environment=dev&issuer=github",
+    );
   });
 
   it.each([
@@ -881,6 +887,7 @@ describe("ConnectRepository", () => {
     if (page === null) {
       expect(screen.getByText(/open the repository's settings and its deploy keys/)).toBeVisible();
       expect(screen.queryByRole("link", { name: /deploy-key page|Deploy from/ })).toBeNull();
+      expect(screen.queryByRole("link", { name: /CI trust rule/ })).toBeNull();
     } else {
       expect(screen.getByRole("link", { name: page })).toBeVisible();
       expect(screen.getByRole("link", { name: ci })).toHaveAttribute(

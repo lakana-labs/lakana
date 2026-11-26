@@ -698,6 +698,8 @@ export interface DeploymentOut {
   readonly commit_sha: string;
   /** When the version became current. */
   readonly updated_at: string;
+  /** The service account its runs write as; null when none is bound. */
+  readonly run_as: string | null;
 }
 
 /** What the server answers a deploy it accepted. */

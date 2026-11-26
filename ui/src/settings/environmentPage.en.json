@@ -42,5 +42,32 @@
   "delete": "Delete environment",
   "deleteOf": "Delete environment {{name}}",
   "deleteProtected": "Protected environments cannot be deleted. Unprotect it first.",
-  "storageNeedsSecrets": "Changing the storage of an environment with a storage secret needs the right to manage secrets in {{name}}: an option such as s3.endpoint decides where the secret is sent."
+  "storageNeedsSecrets": "Changing the storage of an environment with a storage secret needs the right to manage secrets in {{name}}: an option such as s3.endpoint decides where the secret is sent.",
+  "runAs": {
+    "title": "Deployments",
+    "region": "Deployments in {{name}}",
+    "intro": "Each repository deployed here, its commit, and the service account its runs write as. A scheduled run always writes as that account; in a protected environment every run does.",
+    "repository": "Repository",
+    "commit": "Commit",
+    "runsAs": "Runs as",
+    "none": "Nothing is deployed to {{name}} yet.",
+    "unboundProtected": "No account: runs are refused until one is bound",
+    "unbound": "No account: runs started by a person write as that person; schedules do not run",
+    "set": "Set run-as",
+    "setOf": "Set the run-as account of {{repository}}",
+    "change": "Change",
+    "changeOf": "Change the run-as account of {{repository}}",
+    "clear": "Clear",
+    "clearOf": "Clear the run-as account of {{repository}}",
+    "dialogTitle": "Set the run-as account of {{repository}} in {{name}}",
+    "principal": "Service account",
+    "principalHelp": "An active service account. Every run of this deployment writes with its rights: grant it what the project's assets need, and nothing else.",
+    "principalNeeded": "Fill in the service account.",
+    "save": "Save",
+    "bound": "Runs of {{repository}} in {{name}} now write as {{principal}}.",
+    "clearTitle": "Clear the run-as account of {{repository}} in {{name}}?",
+    "clearProtected": "{{name}} is protected: runs of {{repository}} are refused until an account is bound again.",
+    "clearUnprotected": "Runs of {{repository}} that a person starts then write as that person, and its schedules stop running.",
+    "cleared": "Runs of {{repository}} in {{name}} write as no account now."
+  }
 }

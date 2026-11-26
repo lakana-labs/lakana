@@ -12,6 +12,7 @@
 import { type JSX, type Ref, useState } from "react";
 import { Button, Input, Label, Text, TextField } from "react-aria-components";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 
 import {
   ApiError,
@@ -29,10 +30,12 @@ import { shellQuote } from "../shell/shellQuote";
 import { useFocusAfter } from "../shell/useFocusAfter";
 import { markedText } from "../shell/VisibleText";
 import { useAttempt } from "../sign-in/Attempt";
+import { addRulePath } from "./ciTrustWords";
 import { httpsForm, queryOrFragment, type RecognisedHost, recogniseHost } from "./hosts";
 import { CheckOutcome, HostKeys, MadeKeys, useCheck } from "./repositoryCheck";
 import "./connect.css";
 import "./settingsStrings";
+import { useSettingsViewer } from "./viewer";
 
 /** What a name may not contain. */
 const NOT_IN_NAME = /[./%\s]/;
@@ -167,6 +170,8 @@ function TestAccess({ name, environment, host, headingRef }: TestAccessProps): J
   const check = useCheck();
   const ok = check.probe?.outcome === "ok" ? check.probe : null;
   const ci = host.host === "github" || host.host === "gitlab" ? host.host : null;
+  // Only an administrator manages CI trust rules.
+  const admin = useSettingsViewer().admin;
   return (
     <section className="connect-step" aria-labelledby="connect-test">
       <h2 id="connect-test" ref={headingRef} tabIndex={-1}>
@@ -198,11 +203,18 @@ function TestAccess({ name, environment, host, headingRef }: TestAccessProps): J
             copyLabel={t("comingSoon.copy")}
           />
           {ci !== null && (
-            <a
-              href={`${HOW_TO_URL}deploy-from-${ci === "github" ? "github-actions" : "gitlab-ci"}/`}
-            >
-              {t(`settings.connect.test.${ci}`)}
-            </a>
+            <p className="button-row">
+              <a
+                href={`${HOW_TO_URL}deploy-from-${ci === "github" ? "github-actions" : "gitlab-ci"}/`}
+              >
+                {t(`settings.connect.test.${ci}`)}
+              </a>
+              {admin && (
+                <Link to={addRulePath({ repository: name, environment, issuer: ci })}>
+                  {t("settings.connect.test.trustRule", { name, environment })}
+                </Link>
+              )}
+            </p>
           )}
         </>
       )}
