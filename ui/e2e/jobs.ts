@@ -703,6 +703,20 @@ function newRollback(reads: number): DeployOut {
 }
 
 /**
+ * Keeps the rollback a test asks for running at every read, so the Roll back to this… buttons
+ * stay held while the note follows it (a picture of that state). Registered after
+ * {@link stubJobs}, it answers before its route.
+ *
+ * @param page - The page.
+ */
+export async function keepRollbackRunning(page: Page): Promise<void> {
+  await page.route(
+    (url) => url.pathname === `${AT}/deploys/${NEW_ROLLBACK_ID}`,
+    (route) => route.fulfill({ json: { ...newRollback(0), jobs: DEPLOY_JOBS[NEW_ROLLBACK_ID] } }),
+  );
+}
+
+/**
  * Answers the deploys of {@link ENV}: the list (a rollback first once one was asked for), one
  * deploy with its jobs, the current versions (the older one once the rollback succeeded) and a
  * rollback, which the server accepts.
