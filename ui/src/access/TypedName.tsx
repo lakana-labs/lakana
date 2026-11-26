@@ -1,6 +1,7 @@
 /**
  * The end of a dialog that deletes something only once its name is typed exactly: the field,
- * the held delete button with the sentence that says why, and Cancel.
+ * the held delete button with the sentence that says why, and Cancel; and whether what is typed
+ * is that name.
  *
  * @packageDocumentation
  */
@@ -9,6 +10,20 @@ import { Button, Input, Label, TextField } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
 import { PendingButton } from "../shell/PendingButton";
+import { markedText } from "../shell/VisibleText";
+
+/**
+ * Whether what is typed is the name: exactly, or as the label shows it, with each hidden
+ * character written as its mark (`U+202E`), which is the only way to type a name that holds
+ * one. The request still names the real name.
+ *
+ * @param typed - What is typed.
+ * @param name - The name, as stored.
+ * @returns True when they match.
+ */
+export function typedMatches(typed: string, name: string): boolean {
+  return typed === name || typed === markedText(name);
+}
 
 /** Properties of {@link TypedName}. */
 export interface TypedNameProps {

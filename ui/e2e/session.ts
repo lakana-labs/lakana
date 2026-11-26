@@ -809,6 +809,7 @@ export const STUBBED = [
   "/api/v1/settings/sign-in",
   "/api/v1/invites",
   "/api/v1/recovery-links",
+  "/api/v1/access/status",
   ...Object.keys(HOME),
   ...Object.keys(CATALOG),
   TABLES,
@@ -836,7 +837,8 @@ export const STUBBED = [
  * identity provider, Home (with a
  * worker down, an update note and rows in every box), the Catalog (a tree and tables in every
  * health, and the page of `prod/gold.sales/fact_sales`), the administrator's profile picture,
- * Settings' People (under Access) and Sign-in (the session lengths), no environment to run a
+ * Settings' People (under Access, no scope managed by an access file) and Sign-in (the session
+ * lengths), no environment to run a
  * query in (`stubQueries` adds two), none to read jobs in (`stubJobs` adds two) and none to
  * read connections in (`stubConnections` adds two).
  *
@@ -865,6 +867,11 @@ export async function signInAsAdmin(page: Page): Promise<void> {
   // The account page's API tokens: none.
   await page.route("**/api/v1/principals/admin/tokens", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/recovery-links", (route) => route.fulfill({ json: [] }));
+  // People asks whether an access file manages the instance before it offers a new service
+  // account: none does (`access.ts` manages some).
+  await page.route("**/api/v1/access/status", (route) =>
+    route.fulfill({ json: { scopes: [], overrides: [] } }),
+  );
   await page.route("**/api/v1/whoami", (route) =>
     route.fulfill({
       json: {

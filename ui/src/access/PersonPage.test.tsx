@@ -1,9 +1,11 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { freshSession, STALE_SESSION, STEP_UP_ROUTES } from "../test/access";
+import { accessStatusRoute, freshSession, STALE_SESSION, STEP_UP_ROUTES } from "../test/access";
 import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
+import type { FakeRoute } from "../test/server";
+import { signedIn } from "../test/session";
 import { fakeWebAuthn } from "../test/webauthn";
 import { issuerHost } from "./ProviderLink";
 
@@ -690,5 +692,361 @@ describe("issuerHost", () => {
     );
     expect(issuerHost("not a url")).toBe("not a url");
     expect(issuerHost("urn:example:issuer")).toBe("urn:example:issuer");
+  });
+});
+
+describe("PersonPage's Deactivate", () => {
+  /** The refusal of the last administrator's deactivation, as the server words it. */
+  const LAST_ADMIN =
+    "This would leave the instance without an active administrator. Give another person the " +
+    "ADMIN role on the instance first, then try again.";
+
+  /**
+   * The routes of a person's page, the principal as given.
+   *
+   * @param name - The principal name.
+   * @param body - What the principal route answers.
+   * @param more - Routes that differ.
+   * @returns The routes.
+   */
+  function pageRoutes(
+    name: string,
+    body: FakeRoute,
+    more: Record<string, FakeRoute> = {},
+  ): Record<string, FakeRoute> {
+    return {
+      [`GET /api/v1/principals/${name}`]: body,
+      [`GET /api/v1/principals/${name}/passkeys`]: { status: 200, body: [] },
+      [`GET /api/v1/principals/${name}/sessions`]: { status: 200, body: [] },
+      ...more,
+    };
+  }
+
+  it("deactivates a person after the passkey touch, asked first, and lands on the heading", async () => {
+    fakeWebAuthn();
+    let active = true;
+    const { user, server } = renderShell("/settings/access/people/kim", {
+      routes: pageRoutes(
+        "kim",
+        () => ({
+          status: 200,
+          body: { name: "kim", type: "USER", is_active: active, picture: null, held_admin: false },
+        }),
+        {
+          "GET /api/v1/sign-in/session": STALE_SESSION,
+          ...STEP_UP_ROUTES,
+          "DELETE /api/v1/principals/kim": () => {
+            active = false;
+            return { status: 204 };
+          },
+        },
+      ),
+    });
+
+    const panel = await screen.findByRole("region", { name: "Deactivate" });
+    await user.click(within(panel).getByRole("button", { name: "Deactivate kim" }));
+    const dialog = await screen.findByRole("dialog", { name: "Deactivate kim?" });
+    expect(dialog).toHaveTextContent(
+      "kim can no longer sign in. Every session of theirs ends now; their personal API tokens " +
+        "and the task tokens made with them stop working, and runs that act as kim fail; their " +
+        "open sign-in links are withdrawn, as are the invites and recovery links they issued.",
+    );
+    expect(dialog).toHaveTextContent(
+      "Their grants, group memberships and audit entries stay on record.",
+    );
+    expect(dialog).toHaveTextContent(
+      "This cannot be undone in this release: nobody can reactivate kim, and the name stays taken.",
+    );
+    const confirm = within(dialog).getByRole("button", { name: "Deactivate" });
+    expect(confirm).toBeDisabled();
+    expect(confirm).toHaveAccessibleDescription("Type the name exactly to deactivate.");
+    await user.type(within(dialog).getByRole("textbox", { name: "Type kim to confirm" }), "Kim");
+    expect(confirm).toBeDisabled();
+    await user.clear(within(dialog).getByRole("textbox", { name: "Type kim to confirm" }));
+    await user.type(within(dialog).getByRole("textbox", { name: "Type kim to confirm" }), "kim");
+    const from = server.sent.length;
+    await user.click(confirm);
+
+    expect(await screen.findByText(/kim is deactivated/)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Deactivate" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Issue a recovery link" })).toBeNull();
+    expect(screen.getByText("Deactivated kim.")).toBeInTheDocument();
+    expect(screen.getByText("Deactivated", { selector: ".pill" })).toHaveClass("pill-warn");
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 1, name: "kim" })).toHaveFocus();
+    });
+    expect(
+      server.sent
+        .slice(from)
+        .filter((request) => request.method !== "GET" || request.path === "/api/v1/sign-in/session")
+        .map((request) => `${request.method} ${request.path}`),
+    ).toEqual([
+      "GET /api/v1/sign-in/session",
+      "POST /api/v1/sign-in/step-up/options",
+      "POST /api/v1/sign-in/step-up",
+      "DELETE /api/v1/principals/kim",
+    ]);
+    // The sessions are read again: the deactivation ended them.
+    expect(
+      server.sent
+        .slice(from)
+        .filter((request) => request.path === "/api/v1/principals/kim/sessions"),
+    ).toHaveLength(1);
+  });
+
+  it("shows the server's sentence when it would leave no administrator, and keeps the dialog", async () => {
+    const { user } = renderShell("/settings/access/people/ada", {
+      routes: pageRoutes(
+        "ada",
+        { status: 200, body: { name: "ada", type: "USER", is_active: true, held_admin: true } },
+        {
+          "DELETE /api/v1/principals/ada": {
+            status: 409,
+            body: { type: "ConflictError", detail: LAST_ADMIN },
+          },
+        },
+      ),
+    });
+
+    const open = await screen.findByRole("button", { name: "Deactivate ada" });
+    await user.click(open);
+    const dialog = await screen.findByRole("dialog", { name: "Deactivate ada?" });
+    await user.type(within(dialog).getByRole("textbox", { name: "Type ada to confirm" }), "ada");
+    await user.click(within(dialog).getByRole("button", { name: "Deactivate" }));
+
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert).toHaveTextContent(LAST_ADMIN);
+    expect(alert).toHaveFocus();
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => {
+      expect(open).toHaveFocus();
+    });
+    expect(screen.queryByText(/ada is deactivated/)).toBeNull();
+  });
+
+  it("keeps the dialog open while the deactivation is on its way", async () => {
+    const answer = held();
+    const { user, server } = renderShell("/settings/access/people/kim", {
+      routes: pageRoutes("kim", principal("kim", false), {
+        "DELETE /api/v1/principals/kim": answer.route,
+      }),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Deactivate kim" }));
+    const dialog = await screen.findByRole("dialog", { name: "Deactivate kim?" });
+    await user.type(within(dialog).getByRole("textbox", { name: "Type kim to confirm" }), "kim");
+    await user.keyboard("{Enter}");
+    expectPending(within(dialog).getByRole("button", { name: /^Deactivate/ }));
+    // A second Enter while it is on its way sends nothing more.
+    await user.keyboard("{Enter}");
+    expect(server.sent.filter((request) => request.method === "DELETE")).toHaveLength(1);
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: "Deactivate kim?" })).toBeInTheDocument();
+    answer.release({ status: 204 });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+  });
+
+  it("says what a service account's deactivation ends", async () => {
+    const { user } = renderShell("/settings/access/people/ci-loader", {
+      routes: pageRoutes(
+        "ci-loader",
+        { status: 200, body: { name: "ci-loader", type: "SERVICE_ACCOUNT", is_active: true } },
+        accessStatusRoute(),
+      ),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Deactivate ci-loader" }));
+    const dialog = await screen.findByRole("dialog", { name: "Deactivate ci-loader?" });
+    expect(dialog).toHaveTextContent(
+      "The API tokens of ci-loader and the task tokens made with them stop working, and runs " +
+        "that act as ci-loader fail.",
+    );
+    expect(dialog).toHaveTextContent(
+      "Its grants, group memberships and audit entries stay on record.",
+    );
+  });
+
+  it("offers no Deactivate for a service account of a managed instance, and names the file", async () => {
+    renderShell("/settings/access/people/ci-loader", {
+      routes: pageRoutes(
+        "ci-loader",
+        { status: 200, body: { name: "ci-loader", type: "SERVICE_ACCOUNT", is_active: true } },
+        accessStatusRoute(["instance"]),
+      ),
+    });
+
+    expect(
+      await screen.findByText(/The whole instance is managed by access.yaml/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('lakana principal deactivate ci-loader --override-managed --reason "WHY"'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Deactivate ci-loader" })).toBeNull();
+  });
+
+  it("offers no Deactivate and no recovery link for someone already deactivated", async () => {
+    renderShell("/settings/access/people/old", {
+      routes: pageRoutes("old", {
+        status: 200,
+        body: { name: "old", type: "USER", is_active: false, held_admin: false },
+      }),
+    });
+
+    expect(await screen.findByText(/old is deactivated/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Deactivate old" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Issue a recovery link" })).toBeNull();
+  });
+
+  it("offers no Deactivate while the person cannot be read", async () => {
+    renderShell("/settings/access/people/kim", {
+      routes: pageRoutes("kim", { status: 500, body: { detail: "Broken." } }),
+    });
+
+    expect(
+      await screen.findByRole("button", { name: "Issue a recovery link" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Deactivate kim" })).toBeNull();
+  });
+
+  it("on one's own page, says it signs one out, and reads the session again after it", async () => {
+    const session = signedIn();
+    const { user } = renderShell("/settings/access/people/admin", {
+      session,
+      routes: pageRoutes(
+        "admin",
+        { status: 200, body: { name: "admin", type: "USER", is_active: true, held_admin: true } },
+        { "DELETE /api/v1/principals/admin": { status: 204 } },
+      ),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Deactivate admin" }));
+    const dialog = await screen.findByRole("dialog", { name: "Deactivate your own account?" });
+    expect(dialog).toHaveTextContent(
+      "You can no longer sign in. Every session of yours ends at once, this one included; " +
+        "your personal API tokens and the task tokens made with them stop working, and runs " +
+        "that act as you fail; your open sign-in links are withdrawn, as are the invites and " +
+        "recovery links you issued.",
+    );
+    expect(dialog).toHaveTextContent(
+      "Your grants, group memberships and audit entries stay on record.",
+    );
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "Type admin to confirm" }),
+      "admin",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Deactivate" }));
+
+    await waitFor(() => {
+      expect(session.refresh).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("deactivates a name with a hidden character, typed as its label shows it", async () => {
+    const name = "k\u202Eim";
+    const { user, server } = renderShell(`/settings/access/people/${encodeURIComponent(name)}`, {
+      routes: pageRoutes(name, principal(name, false), {
+        [`DELETE /api/v1/principals/${name}`]: { status: 204 },
+      }),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Deactivate kU+202Eim" }));
+    const dialog = await screen.findByRole("dialog", { name: "Deactivate kU+202Eim?" });
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "Type kU+202Eim to confirm" }),
+      "kU+202Eim",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Deactivate" }));
+
+    await waitFor(() => {
+      expect(server.sent.find((request) => request.method === "DELETE")?.path).toBe(
+        `/api/v1/principals/${encodeURIComponent(name)}`,
+      );
+    });
+  });
+
+  it("puts the focus on the heading when the access files' status is read again", async () => {
+    let tries = 0;
+    const { user } = renderShell("/settings/access/people/ci-loader", {
+      routes: pageRoutes(
+        "ci-loader",
+        { status: 200, body: { name: "ci-loader", type: "SERVICE_ACCOUNT", is_active: true } },
+        {
+          "GET /api/v1/access/status": () => {
+            tries += 1;
+            return tries === 1
+              ? { status: 500, body: { detail: "The database is down." } }
+              : { status: 200, body: { scopes: [], overrides: [] } };
+          },
+        },
+      ),
+    });
+
+    const failed = await screen.findByText(
+      /nothing can be changed here for now: The database is down\./,
+    );
+    expect(screen.queryByRole("button", { name: "Deactivate ci-loader" })).toBeNull();
+    await user.click(
+      within(failed.closest(".read-failed") as HTMLElement).getByRole("button", {
+        name: "Try again",
+      }),
+    );
+
+    expect(await screen.findByRole("button", { name: "Deactivate ci-loader" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "ci-loader" })).toHaveFocus();
+  });
+
+  it("marks a hidden character of the name in the panel and the dialog", async () => {
+    const name = "k‮im";
+    const { user } = renderShell(`/settings/access/people/${encodeURIComponent(name)}`, {
+      routes: pageRoutes(name, principal(name, false)),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Deactivate kU+202Eim" }));
+    const dialog = await screen.findByRole("dialog", { name: "Deactivate kU+202Eim?" });
+    expect(dialog.textContent).not.toMatch(/‮/u);
+    expect(
+      within(dialog).getByRole("textbox", { name: "Type kU+202Eim to confirm" }),
+    ).toBeInTheDocument();
+  });
+
+  it("sends nothing on Enter while the typed name differs", async () => {
+    const { user, server } = renderShell("/settings/access/people/kim", {
+      routes: pageRoutes("kim", principal("kim", false)),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Deactivate kim" }));
+    const dialog = await screen.findByRole("dialog", { name: "Deactivate kim?" });
+    await user.type(within(dialog).getByRole("textbox", { name: "Type kim to confirm" }), "ki");
+    within(dialog).getByRole("textbox").closest("form")?.requestSubmit();
+
+    expect(screen.getByRole("dialog", { name: "Deactivate kim?" })).toBeInTheDocument();
+    expect(server.sent.some((request) => request.method === "DELETE")).toBe(false);
+  });
+
+  it("links to adding a passkey when the account has none to touch", async () => {
+    const { user } = renderShell("/settings/access/people/kim", {
+      routes: pageRoutes("kim", principal("kim", false), {
+        "GET /api/v1/sign-in/session": STALE_SESSION,
+        "POST /api/v1/sign-in/step-up/options": {
+          status: 409,
+          body: { type: "NoPasskeyError", detail: "Your account has no passkey at this address." },
+        },
+      }),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Deactivate kim" }));
+    const dialog = await screen.findByRole("dialog", { name: "Deactivate kim?" });
+    await user.type(within(dialog).getByRole("textbox", { name: "Type kim to confirm" }), "kim");
+    await user.click(within(dialog).getByRole("button", { name: "Deactivate" }));
+
+    const alert = await within(dialog).findByRole("alert");
+    expect(within(alert).getByRole("link", { name: "Add a passkey" })).toHaveAttribute(
+      "href",
+      "/account",
+    );
   });
 });

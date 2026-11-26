@@ -47,7 +47,7 @@ import {
   withKeys,
 } from "./SecretValuesFields";
 import { secretUseText } from "./secretUse";
-import { TypedName } from "./TypedName";
+import { TypedName, typedMatches } from "./TypedName";
 import "./secretStrings";
 
 /** Properties of each secret dialog. */
@@ -422,7 +422,7 @@ export function DeleteSecretDialog({
   const attempt = useAttempt();
   const { name } = secret;
   const [typed, setTyped] = useState("");
-  const matches = typed === name;
+  const matches = typedMatches(typed, name);
   return (
     <ActionDialog onClose={onClose}>
       <Form

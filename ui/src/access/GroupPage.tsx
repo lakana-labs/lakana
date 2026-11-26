@@ -32,7 +32,7 @@ import { ManagedNote } from "./ManagedNote";
 import { GROUPS_PATH, grantsPath } from "./accessPaths";
 import { personPath } from "./personPath";
 import { usePrincipalSearch } from "./suggest";
-import { TypedName } from "./TypedName";
+import { TypedName, typedMatches } from "./TypedName";
 import { useAccessStatus } from "./useAccessStatus";
 import { whatWords, whereText } from "./words";
 
@@ -67,7 +67,7 @@ function DeleteGroupDialog({ name, onDeleted, onCancel }: DeleteGroupDialogProps
   const { t } = useTranslation();
   const attempt = useAttempt();
   const [typed, setTyped] = useState("");
-  const matches = typed === name;
+  const matches = typedMatches(typed, name);
   const close = (): void => {
     if (!attempt.busy) onCancel();
   };
