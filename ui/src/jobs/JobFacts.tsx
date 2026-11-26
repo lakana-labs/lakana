@@ -5,7 +5,7 @@
  * @packageDocumentation
  */
 import { type JSX, type ReactNode, useId } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import type { JobOut, NotifyOut } from "../api/jobs";
@@ -76,7 +76,8 @@ function Notifies({ notify }: { readonly notify: NotifyOut }): JSX.Element {
 }
 
 /**
- * The job's schedule in words with its zone, then "paused" or the next run; or the sentence of a
+ * The job's schedule in words with its zone, then "paused" (since when, by whom) or the next run;
+ * or the sentence of a
  * job that has no schedule here. A cron the words do not cover is shown as it is, in monospace.
  *
  * @param props - The job.
@@ -99,11 +100,42 @@ function Schedule({ job }: { readonly job: JobOut }): JSX.Element {
       ) : (
         <VisibleText text={schedule.text} />
       )}
-      {job.paused
-        ? ` · ${t("jobs.facts.paused")}`
-        : job.next_run_at !== null &&
-          ` · ${t("jobs.facts.nextRun", { when: when(job.next_run_at) })}`}
+      {job.paused ? (
+        <>
+          {" · "}
+          <Paused job={job} />
+        </>
+      ) : (
+        job.next_run_at !== null && ` · ${t("jobs.facts.nextRun", { when: when(job.next_run_at) })}`
+      )}
     </>
+  );
+}
+
+/**
+ * "paused", with since when and by whom once the server says so: the principal's name with its
+ * hidden characters marked, or that its account was deleted since.
+ *
+ * @param props - The job.
+ * @param props.job - The job, whose schedule is paused.
+ * @returns The words.
+ */
+function Paused({ job }: { readonly job: JobOut }): JSX.Element {
+  const { t } = useTranslation();
+  const when = useWhen();
+  if (job.paused_at === null) {
+    return <>{t("jobs.facts.paused")}</>;
+  }
+  if (job.paused_by === null) {
+    return <>{t("jobs.facts.pausedByDeleted", { when: when(job.paused_at) })}</>;
+  }
+  return (
+    <Trans
+      t={t}
+      i18nKey="jobs.facts.pausedBy"
+      values={{ when: when(job.paused_at) }}
+      components={{ who: <VisibleText text={job.paused_by} /> }}
+    />
   );
 }
 

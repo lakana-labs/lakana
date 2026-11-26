@@ -305,3 +305,19 @@ def test_a_waiting_job_reads_since_when_and_how_and_an_older_server_reads_none()
     assert job.waiting_trigger == "schedule"
     (older,) = _jobs(200, [_JOB]).list("dev")
     assert (older.waiting_since, older.waiting_trigger) == (None, None)
+
+
+def test_a_paused_job_reads_who_paused_it_and_since_when_and_an_older_server_reads_none() -> None:
+    """The pause's principal and time, `None` from a server without them."""
+    body = {
+        **_JOB,
+        "paused": True,
+        "state": "paused",
+        "paused_by": "maria.keller",
+        "paused_at": "2026-10-14T08:30:00+00:00",
+    }
+    (job,) = _jobs(200, [body]).list("dev")
+    assert job.paused_by == "maria.keller"
+    assert job.paused_at is not None and (job.paused_at.hour, job.paused_at.minute) == (8, 30)
+    (older,) = _jobs(200, [_JOB]).list("dev")
+    assert (older.paused_by, older.paused_at) == (None, None)

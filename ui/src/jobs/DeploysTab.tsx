@@ -70,8 +70,8 @@ interface DeploysOfProps {
 
 /**
  * One environment's deploys, the newest run of each repository's current version marked
- * current: the Repository menu (every repository, then those deployed there,
- * in the address as `?repository=`), the line that says why its current versions could not be
+ * current: the Repository menu (every repository, then by name those deployed there and those
+ * whose deploys were listed, in the address as `?repository=`), the line that says why its current versions could not be
  * read, and the deploys, 50 a page with Show more. They are not read again on their own: a
  * deploy is the person's own act, and the list and the current versions are read again once a
  * rollback the person asked for ended. Roll back to this… opens the rollback's question; once
@@ -107,10 +107,19 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
       deployment.project_version_id,
     ]),
   );
-  const repositories = [...current.keys()];
-  if (repository !== null && !current.has(repository)) {
-    repositories.push(repository);
+  // The repositories of the deploys read so far: the menu keeps offering them while the list
+  // shows one repository's deploys. The server lists no repository's deploy history of its own,
+  // so a repository whose deploys are all older than the pages read is not offered until then.
+  const [seen, setSeen] = useState<readonly string[]>([]);
+  const unseen = (pages.items ?? [])
+    .map((deploy) => deploy.repository)
+    .filter((name) => !seen.includes(name));
+  if (unseen.length > 0) {
+    setSeen([...seen, ...new Set(unseen)]);
   }
+  const repositories = [
+    ...new Set([...current.keys(), ...seen, ...(repository === null ? [] : [repository])]),
+  ].sort((first, second) => first.localeCompare(second));
   const [rolling, setRolling] = useState<RollbackTarget | null>(null);
   const [rolled, setRolled] = useState<Rolled | null>(null);
   const { reload: reloadPages } = pages;
@@ -166,6 +175,7 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
           <ChoiceMenu
             className="jobs-filter"
             label={t("jobs.deploys.repository")}
+            note={t("jobs.deploys.repositoryNote", { environment })}
             choices={[
               { id: ALL_REPOSITORIES, text: t("jobs.deploys.allRepositories") },
               ...repositories.map((name) => ({ id: `repo:${name}`, text: markedText(name) })),

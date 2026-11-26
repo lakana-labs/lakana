@@ -120,3 +120,24 @@ export function ratio(first: number, second: number): number {
 export function contrast(palette: Palette, foreground: string, background: string): number {
   return ratio(luminance(palette[foreground] ?? ""), luminance(palette[background] ?? ""));
 }
+
+/**
+ * A colour drawn at an opacity over a background, composited per channel in sRGB as browsers do.
+ *
+ * @param foreground - The colour, `#RRGGBB`.
+ * @param background - The background, `#RRGGBB`.
+ * @param opacity - The foreground's opacity, 0 to 1.
+ * @returns The colour seen, `#RRGGBB`.
+ */
+export function over(foreground: string, background: string, opacity: number): string {
+  const channels = (hex: string): number[] =>
+    [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16));
+  const back = channels(background);
+  return `#${channels(foreground)
+    .map((channel, index) =>
+      Math.round(opacity * channel + (1 - opacity) * (back[index] ?? 0))
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
+}

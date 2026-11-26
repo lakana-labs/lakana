@@ -257,6 +257,16 @@ that was only deployed before it. `lakana deploys list` has a `commit_subject` c
 row of the current version: after a rollback to an earlier version, only the rollback says
 `current`.
 
+### A paused schedule names who paused it
+
+Each job has two new fields, `paused_by` and `paused_at`: the name of the principal that paused
+its schedule and when. Lakana already stored both with every pause, so a schedule paused before
+the upgrade shows them at once, with no migration. Everyone who may read the environment sees
+the name, as they see who started a run and who asked for a deploy; `paused_by` is `null` once
+that principal is deleted. `lakana job show` prints a line such as `Paused since 2026-11-16
+14:20 UTC by ana.nowak.`, the SDK's `Job` has the two attributes (`None` from an older server),
+and the web interface says it on the job's page and on hover over "paused" in **All jobs**.
+
 ### An audit event shows its stored type
 
 Each audit event has a new field, `event_type_raw`: the type as stored, the same as `event_type`.

@@ -32,8 +32,14 @@ know**. The SDK does so.
 Both answer the fields `name`, `environment`, `repository`, `select`, `upstream`, `downstream`,
 `cron`, `timezone`, `state`, `paused`, `next_run_at`, `next_run_local`, `waiting_for`,
 `waits_for_run_id`, `last_run_id`, `last_run_status`, `last_run_trigger`, `last_run_at`,
-`waiting_since`, `waiting_trigger` and `triggers`. `cron`, `timezone` and `state` are unchanged.
-The pause and resume routes answer the same body.
+`waiting_since`, `waiting_trigger`, `paused_by`, `paused_at` and `triggers`. `cron`, `timezone`
+and `state` are unchanged. The pause and resume routes answer the same body.
+
+`paused_by` and `paused_at` say who paused a paused schedule and when: the principal's name,
+shown to everyone who may read the environment as a run's `triggered_by` and a deploy's
+`submitted_by` are, and the time of the pause. `paused_by` is null once that principal was
+deleted, while `paused_at` stays. Both are null for a schedule that is not paused, and a resume
+clears them.
 
 `waiting_since` and `waiting_trigger` describe a start that waits (the state `waiting` or
 `waiting to start`): when it was first asked for, and what asked for it then (`schedule`, `api`,
@@ -54,7 +60,7 @@ do.
 | Command | Shows |
 |---|---|
 | `lakana job list [--env ENV] [--repo REPO]` | one row per job with a `triggers` column that holds each trigger on its own line, for example `schedule 0 6 * * * Europe/Berlin`, `after each deploy` and `on demand`; a paused schedule reads `schedule 0 6 * * * Europe/Berlin (paused)` |
-| `lakana job show NAME [--env ENV] [--repo REPO]` | the job's state, selection and last run, each trigger on its own line with the next run of a schedule, and `notify`: the format and events, with `; via secret NAME` for a caller with the deploy right (see [Get told when a job fails](../how-to/get-told-when-a-job-fails.md#see-where-a-job-reports)); for a job whose start waits, the sentence of what it waits for and a line such as `Waiting since 2026-11-17 09:12 UTC (manual).` |
+| `lakana job show NAME [--env ENV] [--repo REPO]` | the job's state, selection and last run, each trigger on its own line with the next run of a schedule, and `notify`: the format and events, with `; via secret NAME` for a caller with the deploy right (see [Get told when a job fails](../how-to/get-told-when-a-job-fails.md#see-where-a-job-reports)); for a job whose start waits, the sentence of what it waits for and a line such as `Waiting since 2026-11-17 09:12 UTC (manual).`; for a paused schedule a line such as `Paused since 2026-11-16 14:20 UTC by ana.nowak.` (`by an account since deleted` once that principal is gone) |
 
 With `--output json` both print the whole body, `triggers` included.
 
@@ -64,7 +70,7 @@ With `--output json` both print the whole body, `triggers` included.
 triggers the tuple is empty. `Job.commit_sha`, `Job.source_url` (the link to `lakana.yaml` at that
 commit on the git host, or `None`) and `Job.notify` (a `JobNotify` with `format`, `events` and
 `secret`, which is `None` unless you hold the deploy right) are `None` from an older server, and
-so are `Job.waiting_since` and `Job.waiting_trigger`.
+so are `Job.waiting_since`, `Job.waiting_trigger`, `Job.paused_by` and `Job.paused_at`.
 
 ## After a deploy
 
