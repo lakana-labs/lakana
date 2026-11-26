@@ -3,8 +3,14 @@ import { expect, type Page, test } from "@playwright/test";
 import {
   administrator,
   auditEvents,
+  createEnvironment,
   createServiceAccount,
+  grantOn,
   invitedPerson,
+  queryStatusAs,
+  skipTheWelcome,
+  startWorker,
+  submitQueryAs,
   uniqueName,
   violations,
 } from "./helpers";
@@ -71,6 +77,47 @@ test("an administrator reads the log, filters it, and the read is recorded", asy
     viewed.some((each) => each.principal_name === "admin" && each.detail.view === "audit_log"),
   ).toBe(true);
   expect(errors).toEqual([]);
+  await page.context().close();
+});
+
+test("an administrator sees another person's query text as the server hides it", async ({
+  browser,
+  browserName,
+  request,
+}) => {
+  test.skip(browserName !== "chromium", "signs in with a virtual authenticator");
+  test.setTimeout(180_000);
+  const environment = uniqueName("audit-hidden");
+  await createEnvironment(request, environment);
+  const author = await invitedPerson(browser, request, (person) =>
+    grantOn(request, person, "SUBMIT_QUERY", environment),
+  );
+  await skipTheWelcome(author.page);
+  const sql = "SELECT 'not for the audit reader' AS word";
+  // The run must end for the worker to record QUERY_COMPLETED; only this test needs a worker.
+  const stopWorker = await startWorker(request);
+  try {
+    const id = await submitQueryAs(author.page, environment, sql);
+    await expect
+      .poll(() => queryStatusAs(author.page, environment, id), { timeout: 60_000 })
+      .toBe("SUCCEEDED");
+  } finally {
+    await stopWorker();
+  }
+  await author.page.context().close();
+
+  // The administrator holds every action but READ_QUERY_TEXT, so the server sends a fingerprint.
+  const page = await administrator(browser, request);
+  await page.goto(`/settings/audit?event=QUERY_COMPLETED&who=${author.name}`);
+  const region = page.getByRole("region", { name: "Audit events" });
+  const row = region.getByRole("row").filter({ hasText: "QUERY_COMPLETED" });
+  await expect(row).toHaveCount(1);
+  await row.getByRole("button", { name: /^Show details/ }).click();
+  const fingerprint = new RegExp(
+    `^Hidden: SHA-256 [0-9a-f]{12}…, ${String(sql.length)} characters$`,
+  );
+  await expect(region.getByText(fingerprint)).toBeVisible();
+  await expect(region).not.toContainText("not for the audit reader");
   await page.context().close();
 });
 
