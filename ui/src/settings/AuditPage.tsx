@@ -23,7 +23,6 @@ import { ClearFilters } from "../access/ListBits";
 import "../access/access.css";
 import { personPath } from "../access/personPath";
 import { usePrincipalSearch } from "../access/suggest";
-import { DEFAULT_PERIOD, type Period, PERIOD_CHOICES, readPeriod, sinceOf } from "../jobs/period";
 import { ChoiceMenu } from "../shell/ChoiceMenu";
 import { DOCS_URL } from "../shell/docs";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
@@ -50,6 +49,32 @@ const AUDIT_SORTS: ListSortSpec<"occurred"> = {
   natural: { field: "occurred", order: "desc" },
 };
 
+/**
+ * How far back the log is read, in days, as the Runs tab offers it; `all` has no start. Its own
+ * table: importing the Jobs area's would move that module into a chunk the Jobs screen loads too.
+ */
+const PERIOD_DAYS = { "24h": 1, "7d": 7, "30d": 30, all: null } as const;
+
+/** A choice of the Period menu. */
+type Period = keyof typeof PERIOD_DAYS;
+
+/** Every period, in the menu's order. */
+const PERIOD_CHOICES = Object.keys(PERIOD_DAYS) as readonly Period[];
+
+/** The period shown when the address names none. */
+const DEFAULT_PERIOD: Period = "30d";
+
+/**
+ * The time a period starts, counted back from now.
+ *
+ * @param period - The period.
+ * @returns The time (ISO 8601, UTC); null for all time.
+ */
+function startOf(period: Period): string | null {
+  const days = PERIOD_DAYS[period];
+  return days === null ? null : new Date(Date.now() - days * 86_400_000).toISOString();
+}
+
 /** What the page is filtered by, as the address holds it (`?who=&event=&environment=&period=`). */
 interface AuditChoice {
   /** The principal's name; empty for anyone. */
@@ -73,7 +98,7 @@ function readChoice(params: URLSearchParams): AuditChoice {
     who: params.get("who")?.trim() ?? "",
     event: params.get("event")?.trim() ?? "",
     environment: params.get("environment"),
-    period: readPeriod(params.get("period")),
+    period: PERIOD_CHOICES.find((choice) => choice === params.get("period")) ?? DEFAULT_PERIOD,
   };
 }
 
@@ -88,7 +113,7 @@ function toFilter(choice: AuditChoice): AuditFilter {
     principal: choice.who === "" ? null : choice.who,
     eventType: choice.event === "" ? null : choice.event,
     environment: choice.environment,
-    since: sinceOf(choice.period),
+    since: startOf(choice.period),
   };
 }
 
