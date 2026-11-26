@@ -194,3 +194,54 @@
 .sso-warning-word {
   font-weight: 500;
 }
+
+/* Settings › Audit log: a list of facts; an event's fields open in a row of their own under it. */
+.list-scroll.audit-scroll .list {
+  min-width: 720px;
+}
+
+.audit-scroll .audit-when {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.audit-scroll .audit-type {
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+}
+
+.audit-scroll .audit-quiet {
+  color: var(--color-text-muted);
+}
+
+.audit-scroll a.audit-who {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.audit-scroll a.audit-who:hover {
+  text-decoration: underline;
+}
+
+/* The open event and its fields read as one: no hairline between them. */
+.audit-scroll .audit-open td {
+  border-bottom: 0;
+}
+
+.audit-scroll .audit-facts {
+  max-width: var(--reading-width);
+  margin: 0;
+}
+
+/* Each name and value pair stays one grid row: the pair's own box takes no place in the grid. */
+.audit-scroll .audit-fact {
+  display: contents;
+}
+
+.audit-scroll .audit-facts dd {
+  white-space: pre-wrap;
+}
+
+.audit-scroll .link-button {
+  white-space: nowrap;
+}

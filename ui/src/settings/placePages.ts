@@ -114,4 +114,10 @@ export const PLACE_PAGES: Record<PagePlaceId, () => Promise<ComponentType>> = {
    * @returns The page.
    */
   configuration: async () => (await import("./ConfigurationPage")).ConfigurationPage,
+  /**
+   * Audit log: the events, newest first, filtered by who, event, environment and period.
+   *
+   * @returns The page.
+   */
+  audit: async () => (await import("./AuditPage")).AuditPage,
 };

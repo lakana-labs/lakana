@@ -17,5 +17,6 @@
   "signIn": "Sign-in",
   "invites": "Invites",
   "recoveryLinks": "Recovery links",
-  "configuration": "Configuration"
+  "configuration": "Configuration",
+  "audit": "Audit log"
 }

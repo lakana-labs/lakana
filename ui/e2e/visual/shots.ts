@@ -7,6 +7,7 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
 import { stubAccess, stubPolicies, stubSignInAndConfiguration, stubTokensSecrets } from "../access";
+import { stubAudit } from "../audit";
 import { stubArtifacts } from "../artifacts";
 import { PROD_RULE, stubCiTrust } from "../ciTrust";
 import { stubConnect } from "../connect";
@@ -918,6 +919,22 @@ export const SHOTS: readonly Shot[] = [
     stub: admin(stubSignInAndConfiguration),
     path: "/settings/configuration",
     ready: (page) => page.locator(".list-toolbar").first(),
+  },
+  {
+    name: "settings-audit",
+    stub: admin(stubAudit),
+    path: "/settings/audit",
+    ready: text("QUERY_COMPLETED"),
+  },
+  {
+    name: "settings-audit-details",
+    stub: admin(stubAudit),
+    path: "/settings/audit",
+    ready: text("QUERY_COMPLETED"),
+    act: async (page) => {
+      await page.getByRole("button", { name: /^Show details of QUERY_COMPLETED/ }).click();
+      await page.getByText("tables_touched").waitFor();
+    },
   },
 
   // One's own account.

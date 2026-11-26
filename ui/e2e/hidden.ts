@@ -49,6 +49,16 @@ export const STRING_CODES: Readonly<Record<string, readonly string[]>> = {
  */
 export const READ_AS: Readonly<Record<string, string>> = {
   '["display_name","enabled"]': "OidcInfoOut",
+  '["detail","event_type","event_type_raw","id","occurred_at","principal_id","principal_name","securable_environment","securable_kind","securable_namespace","securable_table"]':
+    "AuditEventOut",
+  // An audit event's detail, read by the shape of its keys only: its strings carry the override
+  // but where they look like codes (`READ_TABLE`), which the page shows as they are.
+  '["action"]': "PermissionOut",
+  '["grant_id","principal","role"]': "ViaOut",
+  '["hidden"]': "GetStartedOut",
+  '["length","sha256"]': "ArtifactFileOut",
+  '["mode","run_id","watermark"]': "-",
+  '["row_count","sql_text","tables_touched"]': "-",
   '["absolute_lifetime_minutes","bounds","idle_timeout_minutes","provider","token_provider_window_days"]':
     "SignInSettingsOut",
   '["absolute_lifetime_minutes_max","absolute_lifetime_minutes_min","idle_timeout_minutes_max","idle_timeout_minutes_min","token_provider_window_days_max","token_provider_window_days_min"]':

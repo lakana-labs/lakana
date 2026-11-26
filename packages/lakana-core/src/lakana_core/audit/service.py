@@ -17,14 +17,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import String, and_, or_, select, type_coerce
+from sqlalchemy import String, and_, false, or_, select, type_coerce
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.content import hidden_fields, shown_detail, warn_unclassified
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, SecurableKind
 from lakana_core.config import ViewAuditConfig
 from lakana_core.errors import ValidationError
-from lakana_core.models import AuditEvent, AuditEventType
+from lakana_core.models import AuditEvent, AuditEventType, Principal
 from lakana_core.pagination import parse_sort
 
 ACCESS_APPLY_KEY = "lakana.access_apply_id"
@@ -73,6 +73,8 @@ class ShownAuditEvent:
         When it happened.
     principal_id
         Whom it is attributed to, or `None`.
+    principal_name
+        That principal's name, or `None` for an event attributed to nobody (a failed sign-in).
     event_type
         Its type; `UNKNOWN` for a stored type this release does not know (#613).
     event_type_raw
@@ -94,6 +96,7 @@ class ShownAuditEvent:
     id: uuid.UUID
     occurred_at: datetime
     principal_id: uuid.UUID | None
+    principal_name: str | None
     event_type: AuditEventType
     event_type_raw: str
     securable_kind: SecurableKind | None
@@ -241,6 +244,7 @@ class AuditService:
         kind: str | None = None,
         sort: str | None = None,
         order: str | None = None,
+        principal_name: str | None = None,
     ) -> AuditPage:
         """Read one page of audit events, most recently occurred first.
 
@@ -287,6 +291,9 @@ class AuditService:
             Every order shows the same events; only their sequence changes.
         order
             ``desc`` (the default, the newest first) or ``asc``, the oldest first.
+        principal_name
+            Only return events attributed to the principal of this name, if given: the same
+            filter as its `principal_id`, recorded as one. A name nobody has matches no event.
 
         Returns
         -------
@@ -299,8 +306,8 @@ class AuditService:
         ValidationError
             If this `AuditService` was constructed with no
             `AuthorizationService`, `kind` is not a kind, `event_type` is not of `kind`,
-            `event_type` is `UNKNOWN`, `sort` or `order` is unknown, or `cursor` was read in
-            the other order.
+            `event_type` is `UNKNOWN`, `sort` or `order` is unknown, `cursor` was read in
+            the other order, or both `principal_id` and `principal_name` are given.
         PermissionDenied
             If `p` may not read the audit log.
         AuditUnavailableError
@@ -318,6 +325,10 @@ class AuditService:
                 f"The cursor is not valid for the list sorted by `{chosen.name}`: it came from "
                 f"the list sorted by `{cursor.sort}`. Send the same `sort` and `order` with every "
                 "page, or start the listing again without `cursor`."
+            )
+        if principal_id is not None and principal_name is not None:
+            raise ValidationError(
+                "Filter on principal_id or principal_name, not both: they name the same principal."
             )
         if event_type is AuditEventType.UNKNOWN:
             raise ValidationError(
@@ -339,6 +350,12 @@ class AuditService:
             stmt = stmt.where(AuditEvent.event_type == event_type)
         if environment is not None:
             stmt = stmt.where(AuditEvent.securable_environment == environment)
+        if principal_name is not None:
+            principal_id = self._session.scalars(
+                select(Principal.id).where(Principal.name == principal_name)
+            ).one_or_none()
+            if principal_id is None:
+                stmt = stmt.where(false())
         if principal_id is not None:
             stmt = stmt.where(AuditEvent.principal_id == principal_id)
         if since is not None:
@@ -380,10 +397,31 @@ class AuditService:
             },
             principal_id=principal_id,
         )
-        items = _shown(self._authz, p, rows, raw_types)
+        items = _shown(self._authz, p, rows, raw_types, self._names(rows))
         last = rows[-1] if len(found) > limit else None
         next_cursor = None if last is None else AuditCursor(last.occurred_at, last.id, chosen.name)
         return AuditPage(items=items, next_cursor=next_cursor)
+
+    def _names(self, rows: Sequence[AuditEvent]) -> dict[uuid.UUID, str]:
+        """Name the principals a page's events are attributed to, in one read.
+
+        Parameters
+        ----------
+        rows
+            The events of the page.
+
+        Returns
+        -------
+        dict of uuid.UUID to str
+            Each principal's name by id.
+        """
+        ids = {row.principal_id for row in rows if row.principal_id is not None}
+        if not ids:
+            return {}
+        found = self._session.execute(
+            select(Principal.id, Principal.name).where(Principal.id.in_(ids))
+        ).all()
+        return {principal_id: name for principal_id, name in found}
 
     def _record_read(
         self,
@@ -468,6 +506,7 @@ def _shown(
     p: PrincipalRef,
     rows: Sequence[AuditEvent],
     raw_types: dict[uuid.UUID, str],
+    names: dict[uuid.UUID, str],
 ) -> list[ShownAuditEvent]:
     """Copy the events of a page for their reader, hiding what the reader may not see.
 
@@ -484,6 +523,8 @@ def _shown(
         The stored events.
     raw_types
         Each event's type as stored, by id.
+    names
+        The name of each principal the events are attributed to, by id.
 
     Returns
     -------
@@ -504,6 +545,7 @@ def _shown(
                 id=row.id,
                 occurred_at=row.occurred_at,
                 principal_id=row.principal_id,
+                principal_name=None if row.principal_id is None else names.get(row.principal_id),
                 event_type=row.event_type,
                 event_type_raw=raw_types[row.id],
                 securable_kind=row.securable_kind,

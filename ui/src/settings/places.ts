@@ -28,7 +28,8 @@ export type SettingsPlaceId =
   | "sign-in"
   | "invites"
   | "recovery-links"
-  | "configuration";
+  | "configuration"
+  | "audit";
 
 /** What the rules know about the person: a part of what `GET /api/v1/whoami` answers. */
 export type SettingsViewer = Pick<AccessOut, "admin" | "noAccessYet"> & {
@@ -109,7 +110,7 @@ export interface SettingsPlace {
  * @remarks
  * The spec's full order is: Status, Environments, Repositories, CI trust, Access (People, Groups, Grants,
  * Tokens, Secrets, Row filters & masks, Access file, What I may do), Sign-in (Invites, Recovery
- * links), Configuration. A new place is one entry here, at its place in that order, plus its
+ * links), Configuration, Audit log. A new place is one entry here, at its place in that order, plus its
  * loader in `placePages.ts` (kept literal, `as const`, so that file can tell the pages from the
  * groups and refuse a page without a loader).
  */
@@ -273,6 +274,15 @@ export const SETTINGS_PLACES = [
     id: "configuration",
     path: "configuration",
     label: "settings.places.configuration",
+    parent: null,
+    kind: "page",
+    below: false,
+    visible: (viewer) => viewer.admin,
+  },
+  {
+    id: "audit",
+    path: "audit",
+    label: "settings.places.audit",
     parent: null,
     kind: "page",
     below: false,

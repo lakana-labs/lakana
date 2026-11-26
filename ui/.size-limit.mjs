@@ -83,6 +83,10 @@ const NAMED_LIMITS = [
   // each secret's use and Rotate, Set use and Delete, and the loaders of the dialogs); the
   // dialogs load when one is opened (SecretDialogs-, on the shared limit).
   { name: "Secrets", prefix: "SecretsPage-", limit: "3.59 kB" },
+  // Measured 4.98 kB (2026-11-26) + 10 %: Settings › Audit log (the filters Who and Event with
+  // the 126 event types it suggests, Environment and Period, the list sorted by When with each
+  // event's details and the words for what the server hid, Show more, and the place's strings).
+  { name: "Audit log", prefix: "AuditPage-", limit: "5.48 kB" },
   // Measured 29.08 kB (the Catalog: the list with its columns, health word, owner, header sorting,
   // the Sort by and Order menus, paging and states, 2026-11-13, 13.44 kB; and the tree of places
   // with React Aria's NavigationTree, the search field and the match line, +15.64 kB, almost all
