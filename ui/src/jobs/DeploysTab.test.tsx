@@ -390,7 +390,13 @@ describe("DeploysTab", () => {
       await user.click(await screen.findByRole("button", { name: "Roll back" }));
       await screen.findByText("Rolling back analytics in prod to 4f9d2a7…");
 
-      // Another repository's rollback would replace the note that follows this one.
+      // Another repository's rollback would replace the note that follows this one, and an
+      // undeploy would end what it follows.
+      const undeploy = screen.getByRole("button", { name: "Undeploy… (analytics from prod)" });
+      expect(undeploy).toHaveAttribute("aria-disabled", "true");
+      expect(undeploy).toHaveAccessibleDescription("Rolling back analytics in prod to 4f9d2a7…");
+      await user.click(undeploy);
+      expect(screen.queryByRole("dialog")).toBeNull();
       expect(billing).toHaveAttribute("aria-disabled", "true");
       expect(billing).toHaveAccessibleDescription("Rolling back analytics in prod to 4f9d2a7…");
       await user.click(billing);
@@ -465,6 +471,139 @@ describe("DeploysTab", () => {
         screen.getByText("Rolled back analytics in prod to 4f9d2a7.").closest("[tabindex]"),
       ).toHaveFocus();
     });
+  });
+
+  it("offers Undeploy… only beside the current deploy, to a person who may undeploy", async () => {
+    renderTab(
+      list([NOW, aDeploy(), aDeploy({ id: "d-failed", status: "failed" })]),
+      "/jobs/deploys?environment=prod",
+    );
+    const region = await screen.findByRole("region", { name: "Deploys of prod" });
+
+    const button = await within(region).findByRole("button", { name: /^Undeploy…/u });
+    expect(button).toHaveAccessibleName("Undeploy… (analytics from prod)");
+    expect(within(region).getAllByRole("button", { name: /^Undeploy…/u })).toHaveLength(1);
+    expect(button.closest("tr")).toHaveTextContent("current");
+  });
+
+  it("offers no Undeploy… to a person who may not undeploy", async () => {
+    renderTab(list([{ ...NOW, actions: ["rollback"] }, aDeploy()]));
+    const region = await screen.findByRole("region", { name: "Deploys of dev" });
+    await within(region).findByRole("button", { name: /^Roll back/u });
+    expect(within(region).queryByRole("button", { name: /^Undeploy/u })).toBeNull();
+  });
+
+  it("after an undeploy the note says so and takes the focus, and the row buttons wait for the current versions", async () => {
+    let undeployed = false;
+    const versions = held();
+    const billingNow = aDeploy({
+      id: "d-billing-now",
+      repository: "billing",
+      project_version_id: "5e6f7081-92a3-4b4c-8d5e-6f708192a3b4",
+      resolved_sha: "6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a",
+    });
+    const billingOld = aDeploy({
+      id: "d-billing-old",
+      repository: "billing",
+      resolved_sha: "5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f",
+      project_version_id: "4d5e6f70-8192-4a3b-9c4d-5e6f708192a3",
+      created_at: "2026-11-15T09:00:00Z",
+    });
+    const billing = aDeployment({
+      repository: "billing",
+      project_version_id: billingNow.project_version_id ?? "",
+      commit_sha: billingNow.resolved_sha ?? "",
+    });
+    const { server, user } = renderTab(
+      list([NOW, aDeploy(), billingNow, billingOld]),
+      "/jobs/deploys?environment=prod",
+      () =>
+        undeployed
+          ? versions.route()
+          : { status: 200, body: [aDeployment({ run_as: "svc-analytics" }), billing] },
+    );
+    server.route({
+      "GET /api/v1/environments/prod/jobs": { status: 200, body: [] },
+      "DELETE /api/v1/environments/prod/deployments/analytics": () => {
+        undeployed = true;
+        return { status: 204 };
+      },
+    });
+
+    const button = await screen.findByRole("button", {
+      name: "Undeploy… (analytics from prod)",
+    });
+    await user.click(button);
+    const dialog = await screen.findByRole("dialog", { name: "Undeploy analytics from prod?" });
+    expect(dialog).toHaveTextContent("prod is protected.");
+    expect(dialog).toHaveTextContent(
+      "The service account its runs write as, svc-analytics: no longer bound",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(button).toHaveFocus();
+    });
+
+    await user.click(button);
+    await user.type(await screen.findByRole("textbox"), "analytics");
+    await user.click(screen.getByRole("button", { name: "Undeploy" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    // The deployment is gone: nothing of analytics is offered, and the note has the focus.
+    const said = "Undeployed analytics from prod. Its tables stay, as orphans.";
+    expect(await screen.findByText(said)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(said).closest("[tabindex]")).toHaveFocus();
+    });
+    expect(screen.queryByRole("button", { name: /analytics/u })).toBeNull();
+    expect(screen.getByRole("region", { name: "Deploys of prod" })).not.toHaveTextContent(
+      "4f9d2a7 · current",
+    );
+    // Until the current versions are read again, the other rows wait for them.
+    const billingBack = screen.getByRole("button", {
+      name: "Roll back to this… (billing at 5e6f7a8)",
+    });
+    expect(billingBack).toHaveAttribute("aria-disabled", "true");
+    expect(billingBack).toHaveAccessibleDescription(said);
+    await user.click(billingBack);
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    versions.release({ status: 200, body: [billing] });
+    await waitFor(() => {
+      expect(billingBack).not.toHaveAttribute("aria-disabled");
+    });
+    expect(screen.queryByRole("button", { name: /analytics/u })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Undeploy… (billing from prod)" }),
+    ).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("keeps the undeployed repository unoffered when the current versions cannot be read again", async () => {
+    let undeployed = false;
+    const { server, user } = renderTab(
+      list([NOW, aDeploy()]),
+      "/jobs/deploys?environment=prod",
+      () =>
+        undeployed
+          ? { status: 503, body: { type: "Unavailable", detail: "The server is busy." } }
+          : { status: 200, body: [CURRENT] },
+    );
+    server.route({
+      "GET /api/v1/environments/prod/jobs": { status: 200, body: [] },
+      "DELETE /api/v1/environments/prod/deployments/analytics": () => {
+        undeployed = true;
+        return { status: 204 };
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: /^Undeploy…/u }));
+    await user.type(await screen.findByRole("textbox"), "analytics");
+    await user.click(screen.getByRole("button", { name: "Undeploy" }));
+
+    expect(await screen.findByText(/The current versions could not be read/u)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Roll back|^Undeploy/u })).toBeNull();
   });
 
   it("a choice of environment writes the shared filter", async () => {

@@ -6,11 +6,13 @@ actions this caller's rights allow on it, as `catalog.row_actions` says of table
 - A job: ``run`` (`RUN` on the environment), ``pause`` and ``resume`` (`DEPLOY`, and not a CI
   token).
 - A run: ``cancel`` and ``resume`` (`RUN` on the environment).
-- A deploy: ``rollback`` (`DEPLOY`, and not a CI token).
+- A deploy: ``rollback`` and ``undeploy`` (`DEPLOY`, and not a CI token); ``undeploy`` names
+  the right to undeploy the deploy's repository from its environment.
 
 The words are rights only. A client offers a word's control only when the word is listed and
 the object's state allows it (Pause for an unpaused job with a schedule, Cancel for a queued or
-running run). The server decides every request again.
+running run, Undeploy beside the deploy that made the repository's current version). The
+server decides every request again.
 
 The rights of a whole answer are asked in one `permits_each` batch over its distinct
 environments, and, like every visibility question, they write no audit event and no
@@ -30,7 +32,7 @@ JOB_ACTIONS = ("run", "pause", "resume")
 RUN_ACTIONS = ("cancel", "resume")
 """The words a run's `actions` may hold, in this order."""
 
-DEPLOY_ACTIONS = ("rollback",)
+DEPLOY_ACTIONS = ("rollback", "undeploy")
 """The words a deploy's `actions` may hold."""
 
 

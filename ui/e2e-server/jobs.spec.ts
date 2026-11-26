@@ -8,11 +8,13 @@ import {
   freshPage,
   grantOn,
   invitedPerson,
+  jobNames,
   recordDeployedJob,
   recordDeployHistory,
   signInLocally,
   skipTheTour,
   skipTheWelcome,
+  startJobRun,
   startWorker,
   uniqueName,
   violations,
@@ -455,10 +457,94 @@ for (const scheme of ["light", "dark"] as const) {
       expect(await violations(page), "the rollback dialog").toEqual([]);
       await page.keyboard.press("Escape");
       await expect(dialog).toBeHidden();
+
+      await page
+        .getByRole("button", { name: `Undeploy… (${repository} from ${environment})` })
+        .click();
+      const undeploy = page.getByRole("dialog", {
+        name: `Undeploy ${repository} from ${environment}?`,
+      });
+      await expect(undeploy.getByRole("list", { name: "What the undeploy removes" })).toBeVisible();
+      expect(await violations(page), "the undeploy dialog").toEqual([]);
+      expect(await overflow()).toBeLessThanOrEqual(0);
+      await page.keyboard.press("Escape");
+      await expect(undeploy).toBeHidden();
       await page.context().close();
     });
   }
 }
+
+test("an administrator undeploys a repository, naming its jobs; its deploys stay, none current", async ({
+  browser,
+  request,
+}) => {
+  const { environment, repository } = await deployedTwiceOver(request);
+  const page = await administrator(browser, request);
+
+  await page.goto(`/jobs/deploys?environment=${environment}`);
+  const region = page.getByRole("region", { name: `Deploys of ${environment}` });
+  await expect(region.getByRole("row").nth(1)).toContainText("9c1e5b3 · current");
+  const button = page.getByRole("button", {
+    name: `Undeploy… (${repository} from ${environment})`,
+  });
+  await expect(region.getByRole("row").nth(1).getByRole("button")).toHaveText(/^Undeploy…/);
+
+  await button.click();
+  const dialog = page.getByRole("dialog", { name: `Undeploy ${repository} from ${environment}?` });
+  // The current version declares one job; no run principal is bound, so none is named.
+  await expect(
+    dialog.getByRole("list", { name: "What the undeploy removes" }).getByRole("listitem"),
+  ).toHaveText([
+    `${JOB.name}: removed, with its schedule`,
+    `Its glossary terms in ${environment}`,
+    "The health effects of its tables: every health signal of these tables warns",
+  ]);
+  await dialog.getByRole("textbox", { name: `Type ${repository} to confirm` }).fill(repository);
+  await dialog.getByRole("button", { name: "Undeploy" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(
+    page.getByText(`Undeployed ${repository} from ${environment}. Its tables stay, as orphans.`),
+  ).toBeVisible();
+  await expect(page.locator(".jobs-rollback-note")).toBeFocused();
+
+  // Read afresh from the server: both deploys stay listed, none is current, nothing is offered.
+  await page.reload();
+  await expect(region.getByRole("row")).toHaveCount(3);
+  await expect(region).not.toContainText("current");
+  await expect(region.locator("tbody").getByRole("button")).toHaveCount(0);
+  // The job went with the deployment.
+  expect(await jobNames(request, environment)).toEqual([]);
+  await page.context().close();
+});
+
+test("an undeploy refused while a run is queued shows the server's sentence and stays open", async ({
+  browser,
+  request,
+}) => {
+  const { environment, repository } = await deployedTwiceOver(request);
+  await startJobRun(request, environment, repository, JOB.name);
+  const page = await administrator(browser, request);
+  try {
+    await page.goto(`/jobs/deploys?environment=${environment}`);
+    await page
+      .getByRole("button", { name: `Undeploy… (${repository} from ${environment})` })
+      .click();
+    const dialog = page.getByRole("dialog", {
+      name: `Undeploy ${repository} from ${environment}?`,
+    });
+    await dialog.getByRole("textbox").fill(repository);
+    await dialog.getByRole("button", { name: "Undeploy" }).click();
+    const alert = dialog.getByRole("alert");
+    await expect(alert).toContainText(
+      `is active in '${environment}'; cancel it or wait for it to finish before undeploying.`,
+    );
+    await expect(alert).toBeFocused();
+    await expect(dialog).toBeVisible();
+  } finally {
+    await cancelRuns(request, environment);
+  }
+  await page.context().close();
+});
 
 // Last in the file: the rollback it queues stays queued while no worker runs here.
 test("an administrator rolls back to the older version, naming the jobs it changes", async ({
@@ -472,7 +558,8 @@ test("an administrator rolls back to the older version, naming the jobs it chang
   const region = page.getByRole("region", { name: `Deploys of ${environment}` });
   await expect(region.getByRole("row")).toHaveCount(3);
   await expect(region.getByRole("row").nth(1)).toContainText("9c1e5b3 · current");
-  await expect(region.locator("tbody").getByRole("button")).toHaveCount(1);
+  // Roll back to this… on the older deploy, Undeploy… on the current one.
+  await expect(region.locator("tbody").getByRole("button")).toHaveCount(2);
   const button = rollBackButton(page, repository);
   await expect(region.getByRole("row").nth(2)).toContainText("4f9d2a7");
   await expect(region.getByRole("row").nth(2)).toContainText("an account since deleted");

@@ -748,14 +748,14 @@ def test_orphans_say_what_they_are_and_page(client: TestClient) -> None:
 
 
 def test_deploy_actions_offer_rollback_to_deployers_only(client: TestClient) -> None:
-    """A reader reads the deploy with no word; an administrator is offered `rollback`."""
+    """A reader reads the deploy with no word; an administrator is offered both words."""
     _setup(client)
     queued = client.post(
         "/api/v1/environments/dev/deploys", headers=AUTH_HEADER, json={"repository": "analytics"}
     )
     path = f"/api/v1/environments/dev/deploys/{queued.json()['id']}"
     reader = _reader(client)
-    for header, words in ((AUTH_HEADER, ["rollback"]), (reader, [])):
+    for header, words in ((AUTH_HEADER, ["rollback", "undeploy"]), (reader, [])):
         assert client.get(path, headers=header).json()["actions"] == words
         listed = client.get("/api/v1/environments/dev/deploys", headers=header).json()
         assert [d["actions"] for d in listed] == [words]
@@ -807,7 +807,7 @@ def test_get_all_deploys_answers_items_next_cursor_actions_and_who(client: TestC
     assert [d["id"] for d in body["items"]] == ids[:0:-1]
     assert {d["environment"] for d in body["items"]} == {"dev"}
     assert {d["submitted_by"] for d in body["items"]} == {"admin"}
-    assert [d["actions"] for d in body["items"]] == [["rollback"]] * 2
+    assert [d["actions"] for d in body["items"]] == [["rollback", "undeploy"]] * 2
     assert body["items"][0]["jobs"] is None
     assert body["next_cursor"] is not None
     rest = client.get(_ALL, headers=AUTH_HEADER, params={"limit": 2, "cursor": body["next_cursor"]})

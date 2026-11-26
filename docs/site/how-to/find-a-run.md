@@ -145,7 +145,9 @@ offers each repository deployed there now and each one whose deploys the list ha
 that is no longer deployed is there too once its deploys are listed (an older one may need
 **Show more** first); a job's page links to its repository's deploys from its facts. **Roll back to this…** beside an earlier
 successful deploy rolls the repository back to it (see
-[Deploy, dry-run, roll back](projects.md#deploy-dry-run-roll-back)).
+[Deploy, dry-run, roll back](projects.md#deploy-dry-run-roll-back)), and **Undeploy…** beside the
+current one removes the repository's deployment from the environment (see
+[Undeploy](projects.md#undeploy)).
 
 Every long list of the web interface sorts by a column: press the header of **Result** or **When**
 here, **State**, **Run** or **Created** on the Runs tab, a job's **Name**, **Last run** or **Next

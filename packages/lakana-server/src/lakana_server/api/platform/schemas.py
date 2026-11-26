@@ -4749,9 +4749,11 @@ class DeployOut(BaseModel):
         what came of its start; empty for a run that starts no job (a dry run, a rollback, a
         failed deploy, a deploy of the commit already current).
     actions
-        The words of what the caller's rights allow on it: ``rollback``. Rights only, as for a
-        table's `actions`: offer a control only when the word is listed and the deploy's state
-        allows it (Roll back for a succeeded deploy); the server decides every request again.
+        The words of what the caller's rights allow on it: ``rollback`` and ``undeploy`` (to
+        undeploy its repository from the environment). Rights only, as for a table's
+        `actions`: offer a control only when the word is listed and the deploy's state allows
+        it (Roll back for a succeeded deploy, Undeploy for the one that made the repository's
+        current version); the server decides every request again.
     """
 
     id: uuid.UUID

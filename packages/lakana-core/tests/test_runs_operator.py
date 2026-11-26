@@ -66,7 +66,7 @@ def _scope() -> CiScope:
 def test_the_words_are_fixed() -> None:
     assert JOB_ACTIONS == ("run", "pause", "resume")
     assert RUN_ACTIONS == ("cancel", "resume")
-    assert DEPLOY_ACTIONS == ("rollback",)
+    assert DEPLOY_ACTIONS == ("rollback", "undeploy")
 
 
 def test_an_administrator_gets_every_word() -> None:
@@ -75,7 +75,7 @@ def test_an_administrator_gets_every_word() -> None:
 
     assert job_actions(rights) == ("run", "pause", "resume")
     assert run_actions(rights) == ("cancel", "resume")
-    assert deploy_actions(rights) == ("rollback",)
+    assert deploy_actions(rights) == ("rollback", "undeploy")
 
 
 def test_a_reader_gets_no_word() -> None:
