@@ -21798,7 +21798,7 @@
           "audit"
         ],
         "summary": "List audit events",
-        "description": "Lists one page of audit events, newest first (the oldest first with `order=asc`), with optional filters; every order lists the same events. The cursor of the next page is the body's `next_cursor`, null on the last page; send the same filters and order with it. Needs `READ_AUDIT_LOG` on the instance. Another principal's query text and column values are hidden unless the caller also has `READ_QUERY_TEXT`. Answers 422 for a malformed cursor or one of the other order, an unknown `sort` or `order`, a `kind` other than `connection`, an `event_type` that is not of `kind` or not a known type, and 503 when the read had to be recorded in the audit log and could not be; no events are returned then. An event whose type this release does not know (written by a newer release before a downgrade) is listed with `event_type` `UNKNOWN` and its stored type in `event_type_raw`.",
+        "description": "Lists one page of audit events, newest first (the oldest first with `order=asc`), with optional filters; every order lists the same events. The cursor of the next page is the body's `next_cursor`, null on the last page; send the same filters and order with it. Needs `READ_AUDIT_LOG` on the instance. Another principal's query text and column values are hidden unless the caller also has `READ_QUERY_TEXT`. Answers 422 for a malformed cursor or one of the other order, an unknown `sort` or `order`, a `kind` other than `connection`, an `event_type` that is not of `kind` or not a known type, `principal` with `principal_id`, and 503 when the read had to be recorded in the audit log and could not be; no events are returned then. An event whose type this release does not know (written by a newer release before a downgrade) is listed with `event_type` `UNKNOWN` and its stored type in `event_type_raw`.",
         "operationId": "list_audit_events_api_v1_audit_events_get",
         "parameters": [
           {
@@ -21871,6 +21871,25 @@
               "title": "Principal Id"
             },
             "description": "Only return events attributed to this principal, if given."
+          },
+          {
+            "name": "principal",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only events of the principal of this name; not with `principal_id`.",
+              "title": "Principal"
+            },
+            "description": "Only events of the principal of this name; not with `principal_id`."
           },
           {
             "name": "since",
@@ -29449,6 +29468,17 @@
             ],
             "title": "Principal Id"
           },
+          "principal_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Principal Name"
+          },
           "event_type": {
             "$ref": "#/components/schemas/AuditEventType"
           },
@@ -29510,6 +29540,7 @@
           "id",
           "occurred_at",
           "principal_id",
+          "principal_name",
           "event_type",
           "event_type_raw",
           "securable_kind",
@@ -29519,7 +29550,7 @@
           "detail"
         ],
         "title": "AuditEventOut",
-        "description": "Response body for one audit event.\n\nParameters\n----------\nid\n    The event's id.\noccurred_at\n    When the event occurred.\nprincipal_id\n    The principal attributed to this event, or `None` for a failed\n    authentication.\nevent_type\n    The kind of event; `UNKNOWN` for a type this release does not know, which a newer\n    release wrote before a downgrade.\nevent_type_raw\n    The type as stored: the same as `event_type`, except for `UNKNOWN`, where it is the\n    text the newer release wrote.\nsecurable_kind\n    Which tier of the securable hierarchy this event's target belongs\n    to, if any.\nsecurable_environment\n    The environment this event's target belongs to, if any.\nsecurable_namespace\n    The dot-joined namespace path this event's target belongs to, if\n    any.\nsecurable_table\n    The table this event's target refers to, if any.\ndetail\n    Event-specific facts not already captured by the fields above."
+        "description": "Response body for one audit event.\n\nParameters\n----------\nid\n    The event's id.\noccurred_at\n    When the event occurred.\nprincipal_id\n    The principal attributed to this event, or `None` for a failed\n    authentication.\nprincipal_name\n    That principal's name, or `None` when the event is attributed to nobody.\nevent_type\n    The kind of event; `UNKNOWN` for a type this release does not know, which a newer\n    release wrote before a downgrade.\nevent_type_raw\n    The type as stored: the same as `event_type`, except for `UNKNOWN`, where it is the\n    text the newer release wrote.\nsecurable_kind\n    Which tier of the securable hierarchy this event's target belongs\n    to, if any.\nsecurable_environment\n    The environment this event's target belongs to, if any.\nsecurable_namespace\n    The dot-joined namespace path this event's target belongs to, if\n    any.\nsecurable_table\n    The table this event's target refers to, if any.\ndetail\n    Event-specific facts not already captured by the fields above."
       },
       "AuditEventPage": {
         "properties": {

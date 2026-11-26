@@ -9,7 +9,7 @@ These routes of the platform API come from its [OpenAPI document](../openapi.jso
 
 List audit events
 
-Lists one page of audit events, newest first (the oldest first with `order=asc`), with optional filters; every order lists the same events. The cursor of the next page is the body's `next_cursor`, null on the last page; send the same filters and order with it. Needs `READ_AUDIT_LOG` on the instance. Another principal's query text and column values are hidden unless the caller also has `READ_QUERY_TEXT`. Answers 422 for a malformed cursor or one of the other order, an unknown `sort` or `order`, a `kind` other than `connection`, an `event_type` that is not of `kind` or not a known type, and 503 when the read had to be recorded in the audit log and could not be; no events are returned then. An event whose type this release does not know (written by a newer release before a downgrade) is listed with `event_type` `UNKNOWN` and its stored type in `event_type_raw`.
+Lists one page of audit events, newest first (the oldest first with `order=asc`), with optional filters; every order lists the same events. The cursor of the next page is the body's `next_cursor`, null on the last page; send the same filters and order with it. Needs `READ_AUDIT_LOG` on the instance. Another principal's query text and column values are hidden unless the caller also has `READ_QUERY_TEXT`. Answers 422 for a malformed cursor or one of the other order, an unknown `sort` or `order`, a `kind` other than `connection`, an `event_type` that is not of `kind` or not a known type, `principal` with `principal_id`, and 503 when the read had to be recorded in the audit log and could not be; no events are returned then. An event whose type this release does not know (written by a newer release before a downgrade) is listed with `event_type` `UNKNOWN` and its stored type in `event_type_raw`.
 
 Parameters:
 
@@ -19,6 +19,7 @@ Parameters:
 | `kind` | query | no | text or null | Only events of this kind: `connection` is every CONNECTION_* type. |
 | `environment` | query | no | text or null | Only return events whose securable environment matches, if given. |
 | `principal_id` | query | no | text (uuid) or null | Only return events attributed to this principal, if given. |
+| `principal` | query | no | text or null | Only events of the principal of this name; not with `principal_id`. |
 | `since` | query | no | text (date-time) or null | Only return events at or after this time, if given. |
 | `until` | query | no | text (date-time) or null | Only return events at or before this time, if given. |
 | `limit` | query | no | whole number | The maximum number of events to return. Defaults to 100, must be between 1 and 500 inclusive; an out-of-range value is rejected with a 422 rather than silently clamped or ignored. |
