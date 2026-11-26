@@ -5,9 +5,13 @@ import { localeNumbers } from "./numbers";
 describe("localeNumbers", () => {
   it("writes a number for the language, with the options of its format", () => {
     expect(localeNumbers.format(12_400, undefined, "en")).toBe("12,400");
+    // The second time from the formatter made the first.
+    expect(localeNumbers.format(5_000, undefined, "en")).toBe("5,000");
     expect(localeNumbers.format(12_400, " ", "de")).toBe("12.400");
     expect(localeNumbers.format(0.25, "number(style: percent)", "en")).toBe("25%");
     expect(localeNumbers.format(2.5, "number(minimumFractionDigits: 2; )", "de")).toBe("2,50");
+    // Without a language, the runtime's own (i18next always passes one).
+    expect(localeNumbers.format(7, undefined, undefined)).toBe(new Intl.NumberFormat().format(7));
   });
 
   it("leaves a value that is not a number as it is", () => {
