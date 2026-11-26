@@ -93,9 +93,8 @@
 "env unprotect": { class: ui, part: 8, done: true }
 "env usage":
   {
-    class: ui,
-    part: 8,
-    note: "each environment's usage is on its page; the workers' caches are not shown yet",
+    class: git,
+    reason: "after M7: the workers' caches of `env usage` (each environment's usage is on its page) comes with #832; until then the CLI and REST API do it",
   }
 "grant create": { class: ui, part: 7, done: true }
 "grant list": { class: ui, part: 7, done: true }
@@ -169,7 +168,11 @@
 "load": { class: git, reason: "load of a local file; UI file load is #224/#29, optional in M7" }
 "login": { class: ui, part: 1, done: true }
 "logout": { class: ui, part: 1, done: true }
-"me set": { class: ui, part: 1 }
+"me set":
+  {
+    class: git,
+    reason: "after M7: the screen for `me set` (the catalog-text language) comes with #832; until then the CLI and REST API do it",
+  }
 "ns create": { class: ui, part: 3, done: true, note: "properties are set from the CLI" }
 "ns delete": { class: ui, part: 3, done: true }
 "ns get":
@@ -248,7 +251,11 @@
 "runs resume": { class: ui, part: 5, done: true }
 "runs show": { class: ui, part: 5, done: true }
 "scheduler status": { class: ui, part: 8, done: true }
-"search": { class: ui, part: 1 }
+"search":
+  {
+    class: git,
+    reason: "after M7: the screen for `search` (across tables, columns, runs, people and terms) comes with #832; until then the CLI and REST API do it",
+  }
 "secret bind": { class: ui, part: 7, done: true }
 "secret create": { class: ui, part: 7, done: true }
 "secret list": { class: ui, part: 7, done: true }
@@ -283,7 +290,11 @@
 "table expiring": { class: ui, part: 3, done: true }
 "table get": { class: read, part: 3, done: true }
 "table health": { class: read, part: 3, done: true }
-"table lineage": { class: read, part: 3, note: "run lineage is not shown on the table page" }
+"table lineage":
+  {
+    class: git,
+    reason: "after M7: the run lineage of `table lineage` on the table page comes with #832; until then the CLI and REST API do it",
+  }
 "table list": { class: ui, part: 3, done: true }
 "table maintain": { class: ui, part: 3, done: true }
 "table merge":
@@ -494,12 +505,14 @@
   { class: read, part: 3, done: true }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/health/signals":
   {
-    class: read,
-    part: 3,
-    note: "the Health tab shows the current signals from /health; the signal history comes with part 5",
+    class: git,
+    reason: "after M7: the signal history on the table's Health tab comes with #832; until then the CLI and REST API do it",
   }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/lineage":
-  { class: read, part: 3, note: "run lineage is not shown on the table page" }
+  {
+    class: git,
+    reason: "after M7: the run lineage of `table lineage` on the table page comes with #832; until then the CLI and REST API do it",
+  }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/references":
   { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention":
@@ -535,7 +548,11 @@
     reason: "after M7: the screen for `check list` comes with #832; until then the CLI and REST API do it",
   }
 "GET /api/v1/environments/{env}/runs/{run_id}/tasks/{asset}/log": { class: ui, part: 5, done: true }
-"GET /api/v1/environments/{env}/search": { class: ui, part: 1 }
+"GET /api/v1/environments/{env}/search":
+  {
+    class: git,
+    reason: "after M7: the screen for `search` (across tables, columns, runs, people and terms) comes with #832; until then the CLI and REST API do it",
+  }
 "GET /api/v1/environments/{env}/terms":
   {
     class: git,
@@ -670,7 +687,11 @@
 "PATCH /api/v1/principals/{name}/interface-state": { class: ui, part: 2, done: true }
 "PATCH /api/v1/repositories/{name}": { class: ui, part: 8, done: true }
 "PATCH /api/v1/settings/sign-in": { class: ui, part: 8, done: true, note: "Settings › Sign-in" }
-"PATCH /api/v1/whoami": { class: ui, part: 1 }
+"PATCH /api/v1/whoami":
+  {
+    class: git,
+    reason: "after M7: the screen for `me set` (the catalog-text language) comes with #832; until then the CLI and REST API do it",
+  }
 "POST /api/v1/access/apply":
   {
     class: git,
