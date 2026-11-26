@@ -1,0 +1,33 @@
+{
+  "serviceAccounts": {
+    "create": "New service account",
+    "intro": "A service account is the account of a program, such as a CI job or a scheduled load: it signs in with an API token, never with a passkey. It can do nothing until it has a grant.",
+    "name": "Name",
+    "nameHelp": "The name its grants and tokens name it by. It must not be taken, in any letter case, and cannot be changed later.",
+    "nameNeeded": "Type a name first.",
+    "submit": "Create service account",
+    "created": "Created the service account {{name}}. It can do nothing until it has a grant.",
+    "command": "lakana principal create NAME --type service-account --override-managed --reason \"WHY\""
+  },
+  "deactivate": {
+    "title": "Deactivate",
+    "intro": "For someone who leaves, or an account no longer needed. It cannot be undone in this release.",
+    "actionOf": "Deactivate {{name}}",
+    "action": "Deactivate",
+    "dialogTitle": "Deactivate {{name}}?",
+    "dialogTitleOwn": "Deactivate your own account?",
+    "endsPerson": "{{name}} can no longer sign in. Every session of theirs ends now; their personal API tokens and the task tokens made with them stop working, and runs that act as {{name}} fail; their open sign-in links are withdrawn, as are the invites and recovery links they issued.",
+    "endsService": "The API tokens of {{name}} and the task tokens made with them stop working, and runs that act as {{name}} fail.",
+    "endsOwn": "You can no longer sign in. Every session of yours ends at once, this one included; your personal API tokens and the task tokens made with them stop working, and runs that act as you fail; your open sign-in links are withdrawn, as are the invites and recovery links you issued.",
+    "keptPerson": "Their grants, group memberships and audit entries stay on record.",
+    "keptService": "Its grants, group memberships and audit entries stay on record.",
+    "keptOwn": "Your grants, group memberships and audit entries stay on record.",
+    "final": "This cannot be undone in this release: nobody can reactivate {{name}}, and the name stays taken.",
+    "type": "Type {{name}} to confirm",
+    "held": "Type the name exactly to deactivate.",
+    "done": "Deactivated {{name}}.",
+    "state": "Deactivated",
+    "note": "{{name}} is deactivated: they cannot sign in, and their tokens do not work.",
+    "command": "lakana principal deactivate {{- name}} --override-managed --reason \"WHY\""
+  }
+}

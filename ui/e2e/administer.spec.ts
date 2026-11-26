@@ -242,7 +242,7 @@ test.describe("administering sign-in", () => {
     expect(await violations(page), "settings").toEqual([]);
     await idle.fill("5");
     await page.getByRole("button", { name: "Save" }).click();
-    await expect(page.getByRole("alert")).toContainText("between 15 and 1440 minutes");
+    await expect(page.getByRole("alert")).toContainText("between 15 and 1,440 minutes");
     expect(await violations(page), "settings with a refusal").toEqual([]);
     expect(errors).toEqual([]);
   });

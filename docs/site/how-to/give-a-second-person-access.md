@@ -43,6 +43,15 @@ It can do nothing yet. Next:
 
 A principal can do nothing until it has a grant. The command prints the two steps that follow.
 
+A program that signs in with a token of its own, such as a CI job or a scheduled load, gets a
+principal of the type `service-account` instead (`--type service-account`). In the web interface,
+an administrator creates one under **Settings → Access → People** with **New service account**:
+type its name, then touch your passkey. It can do nothing until it has a grant, as below; its
+token still comes from `lakana token issue`. While an access file manages the instance, the
+service accounts are listed in that file, and the page names the file instead of offering the
+button ([Keep access in a reviewed file](keep-access-in-a-reviewed-file.md)). A person comes in
+through an invite, not this button ([Invite your team](invite-your-team.md)).
+
 A new name must not look like an existing one. It is compared with every principal, active or
 deactivated, after Unicode NFKC normalisation and case folding, so while `alice` exists these are
 refused (409): `Alice`, `ALICE`, and the fullwidth `ａｌｉｃｅ`; `STRASSE` collides with `straße`
@@ -284,6 +293,19 @@ Deactivated principal alice
 
 The saved profile stays on the person's machine, but its token no longer works; they can remove it
 with `lakana logout`.
+
+In the web interface, an administrator opens the person (or service account) under **Settings →
+Access → People** and chooses **Deactivate** at the end of the page. The dialog says what ends:
+every browser session of theirs, their personal API tokens and the task tokens made with them,
+the runs that act as them, and their open sign-in links, as well as the invites and recovery
+links they issued. Their grants, group memberships and audit entries stay on record. Type the name
+exactly, then touch your passkey; a name that holds a hidden character is typed as the dialog
+shows it, with the character written as its code (such as `U+202E`). Deactivating cannot be undone in this release: nobody can reactivate the account, and
+its name stays taken. The server refuses to deactivate the last active administrator, and the
+dialog shows its sentence: give another person the `ADMIN` role on the instance first.
+Deactivating your own account signs you out at once. A service account of an instance that an
+access file manages is deactivated through the file: remove it from `service_accounts` and apply
+the file. Its page names the file and shows the command for an emergency instead of the button.
 
 ## Where next
 

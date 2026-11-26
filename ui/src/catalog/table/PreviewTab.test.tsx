@@ -1,4 +1,5 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
+import i18next from "i18next";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { FakeServer } from "../../test/server";
@@ -132,6 +133,28 @@ describe("PreviewTab", () => {
   it("says how many rows there are, and leaves out an unknown time", async () => {
     renderShell(PREVIEW);
     expect(await line()).toHaveTextContent(/^2 rows · read as you · 0\.8 s$/);
+  });
+
+  it("writes the count for the language", async () => {
+    renderShell(PREVIEW, {
+      routes: {
+        [RESULT_ROUTE]: { status: 200, body: result({ row_count: 12_400, next_offset: 2 }) },
+      },
+    });
+    expect(await line()).toHaveTextContent("First 2 of 12,400 rows · read as you · 0.8 s");
+  });
+
+  it("takes the count and the time from one message, so a language may order them", async () => {
+    await import("./tableStrings");
+    const key = "table.preview.rowsTimed_other";
+    const before = i18next.getResource("en", "translation", key) as string;
+    i18next.addResource("en", "translation", key, "{{seconds}} s to read {{count}} rows as you");
+    try {
+      renderShell(PREVIEW);
+      expect(await line()).toHaveTextContent(/^0\.8 s to read 2 rows as you$/);
+    } finally {
+      i18next.addResource("en", "translation", key, before);
+    }
   });
 
   it("leaves out the time when the server does not know it", async () => {

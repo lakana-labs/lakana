@@ -178,10 +178,10 @@ describe("SignInSettings", () => {
 
     const idle = await screen.findByRole("textbox", { name: "Idle timeout in minutes" });
     expect(idle).toHaveValue("720");
-    expect(idle).toHaveAccessibleDescription(/Between 15 and 1440 minutes/);
+    expect(idle).toHaveAccessibleDescription(/Between 15 and 1,440 minutes/);
     const absolute = screen.getByRole("textbox", { name: "Longest session in minutes" });
     expect(absolute).toHaveValue("10080");
-    expect(absolute).toHaveAccessibleDescription(/Between 60 and 43200 minutes/);
+    expect(absolute).toHaveAccessibleDescription(/Between 60 and 43,200 minutes/);
     expect(screen.getByText(/applies to sessions that begin afterwards/)).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Sign-in" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Sign-in" })).toHaveAttribute("aria-current", "page");
@@ -189,12 +189,16 @@ describe("SignInSettings", () => {
   });
 
   it.each([
-    ["Idle timeout in minutes", "10", "The idle timeout is between 15 and 1440 minutes."],
-    ["Idle timeout in minutes", "abc", "The idle timeout is between 15 and 1440 minutes."],
-    ["Idle timeout in minutes", "2000", "The idle timeout is between 15 and 1440 minutes."],
-    ["Longest session in minutes", "x", "The longest session is between 60 and 43200 minutes."],
-    ["Longest session in minutes", "30", "The longest session is between 60 and 43200 minutes."],
-    ["Longest session in minutes", "50000", "The longest session is between 60 and 43200 minutes."],
+    ["Idle timeout in minutes", "10", "The idle timeout is between 15 and 1,440 minutes."],
+    ["Idle timeout in minutes", "abc", "The idle timeout is between 15 and 1,440 minutes."],
+    ["Idle timeout in minutes", "2000", "The idle timeout is between 15 and 1,440 minutes."],
+    ["Longest session in minutes", "x", "The longest session is between 60 and 43,200 minutes."],
+    ["Longest session in minutes", "30", "The longest session is between 60 and 43,200 minutes."],
+    [
+      "Longest session in minutes",
+      "50000",
+      "The longest session is between 60 and 43,200 minutes.",
+    ],
   ])("refuses an out-of-bound %s (%s) and names the bound", async (field, value, message) => {
     const { user, server } = renderShell("/settings/sign-in", {
       routes: { "GET /api/v1/settings/sign-in": { status: 200, body: SETTINGS } },

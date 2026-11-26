@@ -28,8 +28,15 @@ export const ACCESS_STUBBED = [
   "/api/v1/grants/g-2",
   "/api/v1/grants/g-3",
   "/api/v1/grants/g-4",
+  "/api/v1/principals/admin",
   "/api/v1/principals/admin/grants",
+  "/api/v1/principals/admin/passkeys",
   "/api/v1/principals/admin/permissions",
+  "/api/v1/principals/admin/sessions",
+  "/api/v1/principals/ben",
+  "/api/v1/principals/ben/grants",
+  "/api/v1/principals/ben/passkeys",
+  "/api/v1/principals/ben/sessions",
   "/api/v1/principals/maria",
   "/api/v1/principals/maria/grants",
   "/api/v1/principals/maria/passkeys",
@@ -37,6 +44,11 @@ export const ACCESS_STUBBED = [
   "/api/v1/sign-in/step-up/options",
   "/api/v1/sign-in/step-up",
 ];
+
+/** The server's refusal of a change that would leave no active administrator. */
+export const LAST_ADMIN =
+  "This would leave the instance without an active administrator. Give another person the " +
+  "ADMIN role on the instance first, then try again.";
 
 /** Options of {@link stubAccess}. */
 export interface AccessStubOptions {
@@ -116,8 +128,10 @@ function answer(route: Route, json: unknown, status = 200): Promise<void> {
 /**
  * Answers Access's routes: the groups `analysts` (maria, ci-bot) and `ops`, four grants across
  * the instance, `dev` and `prod`, the environments `dev` and `prod`, and the administrator's own
- * grants and permissions; writes change what the next read answers. Register it after
- * `signInAsAdmin`, whose answers for the environments and the grants it replaces.
+ * grants and permissions; the people maria (active) and ben (deactivated), and the administrator,
+ * whose deactivation is refused as the last administrator's; a new service account joins the
+ * people. Writes change what the next read answers. Register it after `signInAsAdmin`, whose
+ * answers for the environments, the grants and the people it replaces.
  *
  * @param page - The page.
  * @param options - The managed scopes and whether names are long.
@@ -336,17 +350,66 @@ export async function stubAccess(page: Page, options: AccessStubOptions = {}): P
       note: null,
     });
   });
-  await page.route("**/api/v1/principals/maria", (route) =>
-    answer(route, {
+  const created: Record<string, unknown>[] = [];
+  // The list of people: the administrator and the new service accounts. A search for a name
+  // (the pickers' suggestions) is left to `signInAsAdmin`'s answer.
+  await page.route(
+    (url) => url.pathname === "/api/v1/principals",
+    async (route) => {
+      const request = route.request();
+      if (request.method() === "POST") {
+        const body = request.postDataJSON() as { name: string; type: string };
+        const account = { name: body.name, type: body.type, is_active: true, picture: null };
+        created.unshift(account);
+        return answer(route, { ...account, held_admin: false }, 201);
+      }
+      if (new URL(request.url()).searchParams.has("q") || created.length === 0) {
+        return route.fallback();
+      }
+      return answer(route, [
+        ...created,
+        { name: "admin", type: "USER", is_active: true, picture: "e1" },
+      ]);
+    },
+  );
+  let mariaActive = true;
+  await page.route("**/api/v1/principals/maria", (route) => {
+    if (route.request().method() === "DELETE") {
+      mariaActive = false;
+      return route.fulfill({ status: 204 });
+    }
+    return answer(route, {
       name: "maria",
       type: "USER",
-      is_active: true,
+      is_active: mariaActive,
+      picture: null,
+      held_admin: false,
+    });
+  });
+  await page.route("**/api/v1/principals/ben", (route) =>
+    answer(route, {
+      name: "ben",
+      type: "USER",
+      is_active: false,
       picture: null,
       held_admin: false,
     }),
   );
-  await page.route("**/api/v1/principals/maria/passkeys", (route) => answer(route, []));
-  await page.route("**/api/v1/principals/maria/sessions", (route) => answer(route, []));
+  await page.route("**/api/v1/principals/admin", (route) =>
+    route.request().method() === "DELETE"
+      ? answer(route, { type: "ConflictError", detail: LAST_ADMIN }, 409)
+      : answer(route, {
+          name: "admin",
+          type: "USER",
+          is_active: true,
+          picture: "e1",
+          held_admin: true,
+        }),
+  );
+  for (const name of ["maria", "ben", "admin"]) {
+    await page.route(`**/api/v1/principals/${name}/passkeys`, (route) => answer(route, []));
+    await page.route(`**/api/v1/principals/${name}/sessions`, (route) => answer(route, []));
+  }
 }
 
 /** The token the account page's Create a token answers with, shown once. */

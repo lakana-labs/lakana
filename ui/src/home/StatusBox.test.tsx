@@ -122,6 +122,13 @@ describe("StatusBox", () => {
     expect(within(region).queryByRole("meter")).not.toBeInTheDocument();
   });
 
+  it("writes memory in GiB for the language, with one decimal", async () => {
+    withStatus({ ...HEALTHY, detail: { ...DETAIL, memory_limit_bytes: 1_536 * 2 ** 30 } });
+
+    const region = await box();
+    expect(await within(region).findByText("1.2 GiB of 1,536.0 GiB")).toBeInTheDocument();
+  });
+
   it("says a cause to a reader only when it affects them", async () => {
     withStatus({ ...HEALTHY, state: "degraded", causes: ["worker_lost"], workers_alive: 1 });
 

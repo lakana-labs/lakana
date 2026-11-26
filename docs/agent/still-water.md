@@ -110,7 +110,9 @@ copied into both of its schemes in the same change, or `scripts/tests/test_docs_
   closing the dialog around it; Enter takes the highlighted suggestion, or with none sends the
   form as any field does. What is typed may still be sent; the server judges it. A person
   who may not list those names gets the plain field, which asks nothing.
-- Every string through i18next (`ui/src/i18n/en.json`); sentence case; the same term everywhere.
+- Every string through i18next (`ui/src/i18n/en.json`; the lint rule `lakana/no-literal-text`
+  fails on one written in a component); sentence case; the same term everywhere. Numbers in a
+  message are passed as numbers, and i18next writes them for the language ("12,400 rows").
   React Aria's own words (its announcements, a list's default name) follow i18next's language
   through `ui/src/i18n/LanguageProvider.tsx`: a new root (another entry, a test's render) wraps
   in it.

@@ -1,6 +1,7 @@
-// The ban on HTML sinks (docs/agent/security.md, Preview and Defined in) is a lint rule, and a
-// rule that never fires guards nothing: each fixture holds one form of raw HTML, and the project's
-// own config must refuse each with exactly one error.
+// The ban on HTML sinks (docs/agent/security.md, Preview and Defined in) and the ban on text not
+// taken from i18next (docs/agent/conventions.md, "Every string the user sees goes through i18next")
+// are lint rules, and a rule that never fires guards nothing: each fixture holds one form, and the
+// project's own config must refuse each with exactly one error.
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,6 +27,23 @@ const FORMS = [
   "set-html-unsafe.tsx",
   "document-write.tsx",
   "document-writeln.tsx",
+];
+const TEXT_MESSAGE =
+  'Text a person reads comes from i18next: put it in a message catalogue and use t() (docs/agent/conventions.md, "Every string the user sees goes through i18next")';
+const TEXT_FORMS = [
+  "text-jsx.tsx",
+  "text-string.tsx",
+  "text-template.tsx",
+  "text-conditional.tsx",
+  "text-aria-label.tsx",
+  "text-title.tsx",
+  "text-placeholder.tsx",
+  "text-alt.tsx",
+  "text-attribute-template.tsx",
+  "text-concatenation.tsx",
+  "text-attribute-concatenation.tsx",
+  "text-prop-heading.tsx",
+  "text-prop-message.tsx",
 ];
 
 /**
@@ -55,5 +73,27 @@ describe("the ban on raw HTML", () => {
     const eslint = new ESLint({ cwd: UI });
 
     expect(await eslint.isPathIgnored(join(FIXTURES, "inner-html.tsx"))).toBe(true);
+  });
+});
+
+describe("the ban on text not taken from i18next", () => {
+  it("fails the lint on each form of literal text", { timeout: 120_000 }, async () => {
+    const results = await lint([...TEXT_FORMS, "text-allowed.tsx", "text-copy-command.tsx"]);
+
+    for (const form of TEXT_FORMS) {
+      const messages = results.get(form)?.messages.map((message) => message.message);
+      expect(messages, form).toEqual([TEXT_MESSAGE]);
+    }
+    expect(results.get("text-allowed.tsx")?.messages).toEqual([]);
+    expect(results.get("text-copy-command.tsx")?.messages).toEqual([]);
+  });
+
+  it("leaves tests alone", { timeout: 120_000 }, async () => {
+    const eslint = new ESLint({ cwd: UI });
+    const config = (await eslint.calculateConfigForFile(join(UI, "src", "App.test.tsx"))) as {
+      rules?: Record<string, unknown>;
+    };
+
+    expect(config.rules?.["lakana/no-literal-text"]).toBeUndefined();
   });
 });

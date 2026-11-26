@@ -47,6 +47,18 @@ describe("QueryError", () => {
     expect(onGoTo).toHaveBeenCalledWith(2, 8);
   });
 
+  it("writes the line and column as their digits, as the editor shows them", () => {
+    show({
+      ...IDLE,
+      phase: "done",
+      run: aRun({ status: "FAILED", error_message: "x", error_line: 1234, error_column: 1001 }),
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Go to line 1234, column 1001" }),
+    ).toBeInTheDocument();
+  });
+
   it("words a failed or cancelled run without a message, and offers no Go to without a place", () => {
     const { container } = show({ ...IDLE, phase: "done", run: aRun({ status: "FAILED" }) });
     expect(screen.getByRole("alert")).toHaveTextContent("The query failed.");

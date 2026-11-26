@@ -11,10 +11,17 @@ import type { JSX } from "react";
  *
  * @param props - The markup.
  * @param props.html - The markup.
+ * @param props.title - The frame's name.
  * @returns The frame.
  */
-export function Raw({ html }: { readonly html: string }): JSX.Element {
+export function Raw({
+  html,
+  title,
+}: {
+  readonly html: string;
+  readonly title: string;
+}): JSX.Element {
   // React types know only srcDoc; it passes the lowercase attribute through.
   // @ts-expect-error srcdoc is not a typed prop
-  return <iframe title="raw" srcdoc={html} />;
+  return <iframe title={title} srcdoc={html} />;
 }

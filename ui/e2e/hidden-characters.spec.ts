@@ -1214,6 +1214,15 @@ walk("Groups, a group, Grants and What I may do mark hidden characters", async (
 
   await visit(page, "/settings/access/what-i-may-do", ["analysts", "dev"]);
   await visit(page, `/settings/access/people/${n("maria")}`, ["analysts", "dev"]);
+  // Deactivate names the person in its button, its question and its field (#828).
+  await page.getByRole("button", { name: /^Deactivate mariaU\+202E/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "the Deactivate dialog", ["maria"]);
+  await expect(
+    page.getByRole("dialog").getByRole("textbox", { name: /^Type mariaU\+202E/ }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
   expectOnlyStubbed(paths, [...STUBBED, ...ACCESS_STUBBED]);
 });
 

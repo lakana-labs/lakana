@@ -64,6 +64,11 @@ const NAMED_LIMITS = [
   // environment, Set retention, Change storage, Delete environment, and a deleted environment's
   // Restore, Delete the files and Remove from the catalog), loaded when one is first opened.
   { name: "the environments' dialogs", prefix: "EnvironmentDialogs-", limit: "4.52 kB" },
+  // Measured 4.68 kB (2026-11-26) + 10 %: Settings › Access › People and a person's page (the
+  // list, the picture, passkeys and sessions, the recovery link, the managed note, Deactivate's
+  // panel and the strings of a new service account and of a deactivation, #828); New service
+  // account and Deactivate's question load when one is opened (on the shared limit).
+  { name: "People", prefix: "PeopleRoutes-", limit: "5.15 kB" },
   // Measured 3.83 kB (2026-11-18) + 10 %: Settings › Access › Grants (the filters Who, On exactly
   // and What with its two sections, the list with the Git mark, Remove and its question); Add
   // grant loads when it is opened (AddGrantDialog-, on the shared limit).
@@ -174,7 +179,9 @@ const NAMED_LIMITS = [
   // tabs and of a job's link to its repository's deploys.
   // The row is written out here rather than through shell/SectionTabs.tsx, which the table page
   // uses: shared, it would be a chunk of its own that the first load's preload list names.
-  { name: "Jobs", prefix: "JobsScreen-", limit: "4.19 kB" },
+  // Raised to the measured 4.20 kB (2026-11-26) + 10 %: durations under 10 s take their one
+  // decimal from the message's number format for the language (#59), not from toFixed.
+  { name: "Jobs", prefix: "JobsScreen-", limit: "4.62 kB" },
   // Measured 4.75 kB (2026-11-18) + 10 %: the Jobs list at /jobs, loaded on demand: the
   // environment filter (remembered, in the address) and the search, Running now (the first 50
   // queued and running runs with their progress and Cancel), Failed, needs attention (the
