@@ -217,7 +217,7 @@ export default function VersionsTab(): JSX.Element | null {
                 className="button"
                 aria-expanded={expanded}
                 aria-controls={filesId(row.version)}
-                aria-label={t("table.artifact.versions.filesOf", { version: row.version })}
+                aria-label={t("table.artifact.versions.filesOf", { version: String(row.version) })}
                 onClick={() => {
                   setOpen(expanded ? null : row.version);
                 }}
@@ -229,7 +229,9 @@ export default function VersionsTab(): JSX.Element | null {
                   type="button"
                   className="button"
                   id={deleteId(row.version)}
-                  aria-label={t("table.artifact.versions.deleteOf", { version: row.version })}
+                  aria-label={t("table.artifact.versions.deleteOf", {
+                    version: String(row.version),
+                  })}
                   onClick={() => {
                     if (gone?.version === row.version) {
                       // A download's sentence about this version is consumed: the delete says its own.

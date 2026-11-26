@@ -8,6 +8,7 @@ import { initReactI18next } from "react-i18next";
 
 import { markedText } from "../shell/VisibleText";
 import en from "./en.json";
+import { localeNumbers } from "./numbers";
 
 /**
  * Starts i18next with the English strings bundled in the build.
@@ -17,16 +18,21 @@ import en from "./en.json";
  * Every interpolated value is "escaped" by {@link markedText}: a name the server sent shows a
  * hidden or format character as a mark such as `U+202E` in any sentence, label or title made with
  * `t()`, without a call at each site. It changes nothing else (numbers, dates, our own words), is
- * idempotent, and leaves markup alone, which React renders as text.
+ * idempotent, and leaves markup alone, which React renders as text. Every number is written for
+ * the language by {@link localeNumbers} ("12,400" in English), with or without `, number` in the
+ * message.
  * @returns The initialised i18next instance.
  */
 export function initI18n(): i18n {
-  void i18next.use(initReactI18next).init({
-    resources: { en: { translation: en } },
-    lng: "en",
-    fallbackLng: "en",
-    initAsync: false,
-    interpolation: { escapeValue: true, escape: markedText },
-  });
+  void i18next
+    .use(initReactI18next)
+    .use(localeNumbers)
+    .init({
+      resources: { en: { translation: en } },
+      lng: "en",
+      fallbackLng: "en",
+      initAsync: false,
+      interpolation: { escapeValue: true, escape: markedText, alwaysFormat: true },
+    });
   return i18next;
 }

@@ -11,8 +11,15 @@ import type { JSX } from "react";
  *
  * @param props - The markup.
  * @param props.html - The markup.
+ * @param props.title - The frame's name.
  * @returns The frame.
  */
-export function Raw({ html }: { readonly html: string }): JSX.Element {
-  return <iframe title="raw" srcDoc={html} />;
+export function Raw({
+  html,
+  title,
+}: {
+  readonly html: string;
+  readonly title: string;
+}): JSX.Element {
+  return <iframe title={title} srcDoc={html} />;
 }

@@ -52,6 +52,16 @@ describe("deletionWords", () => {
       "Deleted version 3 of ml.model. Freed no files. Kept 1 file (33 B) that version 2 also uses.",
     ],
     [
+      "versions as their numbers, a count for the language",
+      {
+        ...answer({ files: 12_400, bytes: 33 }, [
+          { reason: "other_version", files: 1, bytes: 33, version: 1200 },
+        ]),
+        version: 1234,
+      },
+      "Deleted version 1234 of ml.model. Freed 12,400 files (33 B). Kept 1 file (33 B) that version 1200 also uses.",
+    ],
+    [
       "a version the reader may not see",
       answer({ files: 0, bytes: 0 }, [
         { reason: "other_version", files: 2, bytes: 2_500_000, version: null },

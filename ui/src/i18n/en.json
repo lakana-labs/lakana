@@ -164,7 +164,7 @@
       "memory": "Memory",
       "memoryOf": "{{used}} of {{limit}}",
       "memoryNoLimit": "{{used}} in use, limit unknown",
-      "gib": "{{value}} GiB",
+      "gib": "{{value, number(minimumFractionDigits: 1; maximumFractionDigits: 1)}} GiB",
       "workers": "Workers",
       "workersAlive": "{{alive}} alive",
       "workersDown": "{{alive}} alive, {{lost}} down",

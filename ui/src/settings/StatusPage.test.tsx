@@ -112,7 +112,13 @@ describe("StatusPage", () => {
           deploy_run_id: "d",
           memory: null,
         },
-        { ...WORKER, id: "w-4", host: "worker-3.internal", task_run_id: "t" },
+        {
+          ...WORKER,
+          id: "w-4",
+          host: "worker-3.internal",
+          task_run_id: "t",
+          memory: { used_bytes: 1.2 * 2 ** 30, limit_bytes: 2_048 * 2 ** 30 },
+        },
         {
           ...WORKER,
           memory: { ...WORKER.memory, limit_bytes: null },
@@ -155,7 +161,7 @@ describe("StatusPage", () => {
       "—",
       "1.2 GiB, no limit",
       "1.2 of 4.0 GiB",
-      "1.2 of 4.0 GiB",
+      "1.2 of 2,048.0 GiB",
     ]);
     await within(region).findByText("differs from the server");
     expect(rows[0]?.cells[5]).toHaveTextContent("0.22.0 differs from the server");

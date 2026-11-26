@@ -88,7 +88,7 @@ export function QueryError({ state, onGoTo, onRetry }: QueryErrorProps): JSX.Ele
             onGoTo(line, column);
           }}
         >
-          {t("queries.goTo", { line, column })}
+          {t("queries.goTo", { line: String(line), column: String(column) })}
         </Button>
       )}
     </div>
