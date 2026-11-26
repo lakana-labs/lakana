@@ -37,7 +37,7 @@ const P = "settings.ciTrust.explain";
 const TOKEN = /^eyJ[\w-]*\.[\w-]+\.[\w-]*$/;
 
 /** A JSON Web Token anywhere inside a text, such as a value that carries one. */
-const TOKEN_INSIDE = /eyJ[\w-]*\.[\w-]+\.[\w-]*/;
+const TOKEN_INSIDE = /(?<![\w-])eyJ[\w-]*\.[\w-]+\.[\w-]*/;
 
 /**
  * Whether a parsed value holds a token anywhere: in a text, a key, a list or an object inside.

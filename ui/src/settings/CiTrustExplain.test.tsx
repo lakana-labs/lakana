@@ -222,14 +222,28 @@ describe("CiTrustExplain", () => {
       }),
     });
 
-    await fill(user, JSON.stringify({ ref: "refs/heads/main", run_attempt: 2, ok: true }));
+    // A word that merely holds "eyJ." is no token.
+    await fill(
+      user,
+      JSON.stringify({
+        ref: "refs/heads/main",
+        run_attempt: 2,
+        ok: true,
+        workflow: "monkeyJ.config.yml",
+      }),
+    );
     await user.click(screen.getByRole("button", { name: "Explain" }));
 
     expect(await screen.findByRole("region", { name: "Verdict" })).toHaveTextContent(
       "Accepted by rule r-new",
     );
     expect(server.sent.find((request) => request.method === "POST")?.body).toMatchObject({
-      claims: { ref: "refs/heads/main", run_attempt: 2, ok: true },
+      claims: {
+        ref: "refs/heads/main",
+        run_attempt: 2,
+        ok: true,
+        workflow: "monkeyJ.config.yml",
+      },
     });
   });
 });
