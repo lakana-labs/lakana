@@ -267,7 +267,7 @@ export function aDeploy(over: Partial<DeployOut> = {}): DeployOut {
     finished_at: "2026-11-16T09:00:40Z",
     submitted_by: "ana.nowak",
     jobs: null,
-    actions: ["rollback"],
+    actions: ["rollback", "undeploy"],
     ...over,
   };
 }
@@ -284,6 +284,7 @@ export function aDeployment(over: Partial<DeploymentOut> = {}): DeploymentOut {
     project_version_id: "9c1e5b30-7a2d-4e4f-8a6b-1c2d3e4f5061",
     commit_sha: "9c1e5b3a2d4f6e8a0b1c2d3e4f5a6b7c8d9e0f12",
     updated_at: "2026-11-17T08:00:00Z",
+    run_as: null,
     ...over,
   };
 }

@@ -9,9 +9,9 @@
  * deploys of `analytics` in `prod` (the current one, an older successful deploy by an account
  * since deleted, a dry run, a failed deploy and an older rollback from before commit subjects were
  * stored) with the current version and
- * the jobs of each version; and what Run now, Pause, Resume schedule, Cancel, Resume and a
- * rollback answer, the rollback running at its first read and succeeded at the second. What a
- * control changes shows in the reads after it.
+ * the jobs of each version and the service account its runs write as; and what Run now, Pause,
+ * Resume schedule, Cancel, Resume, a rollback and an undeploy answer, the rollback running at its
+ * first read and succeeded at the second. What a control changes shows in the reads after it.
  *
  * @packageDocumentation
  */
@@ -212,6 +212,7 @@ export const JOBS_STUBBED = [
   FAILED_RUNS,
   `${AT}/deploys`,
   `${AT}/deployments`,
+  `${AT}/deployments/${REPOSITORY}`,
   ...DEPLOY_IDS.map((id) => `${AT}/deploys/${id}`),
   `${DEV_AT}/deploys`,
   `${DEV_AT}/deployments`,
@@ -630,7 +631,7 @@ function deploy(id: string, over: Partial<DeployOut> = {}): DeployOut {
     finished_at: "2026-11-17T08:00:40Z",
     submitted_by: "admin",
     jobs: null,
-    actions: ["rollback"],
+    actions: ["rollback", "undeploy"],
     ...over,
   };
 }
@@ -716,15 +717,20 @@ export async function keepRollbackRunning(page: Page): Promise<void> {
   );
 }
 
+/** The service account the runs of the repository's deployment in {@link ENV} write as. */
+export const RUN_AS = "svc-analytics";
+
 /**
  * Answers the deploys of {@link ENV}: the list (a rollback first once one was asked for), one
- * deploy with its jobs, the current versions (the older one once the rollback succeeded) and a
- * rollback, which the server accepts.
+ * deploy with its jobs, the current versions (the older one once the rollback succeeded, none
+ * once the repository was undeployed), a rollback, which the server accepts, and an undeploy,
+ * which it carries out.
  *
  * @param page - The page.
  */
 async function stubDeploys(page: Page): Promise<void> {
   let rolledBack = false;
+  let undeployed = false;
   let reads = 0;
   const succeeded = (): boolean => rolledBack && reads > 1;
   await page.route(
@@ -764,8 +770,19 @@ async function stubDeploys(page: Page): Promise<void> {
         project_version_id: succeeded() ? VERSIONS.older : VERSIONS.current,
         commit_sha: succeeded() ? OLDER_COMMIT : CURRENT_COMMIT,
         updated_at: succeeded() ? "2026-11-17T11:00:30Z" : "2026-11-17T08:00:40Z",
+        run_as: RUN_AS,
       };
-      return route.fulfill({ json: [current] });
+      return route.fulfill({ json: undeployed ? [] : [current] });
+    },
+  );
+  await page.route(
+    (url) => url.pathname === `${AT}/deployments/${REPOSITORY}`,
+    (route) => {
+      if (route.request().method() !== "DELETE") {
+        return route.fallback();
+      }
+      undeployed = true;
+      return route.fulfill({ status: 204 });
     },
   );
   await page.route(

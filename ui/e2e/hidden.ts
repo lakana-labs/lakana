@@ -237,7 +237,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["cost-centre"]': "-",
   '["actions","commit_subject","created_at","environment","error_message","finished_at","id","jobs","kind","project_version_id","repository","requested_ref","resolved_sha","started_at","status","submitted_by"]':
     "DeployOut",
-  '["commit_sha","project_version_id","repository","updated_at"]': "DeploymentOut",
+  '["commit_sha","project_version_id","repository","run_as","updated_at"]': "DeploymentOut",
   '["id","status"]': "DeployAcceptedOut",
   '["downstream","patterns","upstream"]': "JobOut",
   // Access's places: a held grant, a managed scope, a group's member and the access files' status.

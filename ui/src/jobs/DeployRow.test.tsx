@@ -138,4 +138,47 @@ describe("DeployRow", () => {
     await userEvent.click(button);
     expect(onRollBack).toHaveBeenCalledTimes(1);
   });
+
+  it("offers Undeploy… named by the repository and the environment", async () => {
+    const onUndeploy = vi.fn();
+    render(
+      <table>
+        <tbody>
+          <DeployRow deploy={aDeploy()} current onRollBack={null} onUndeploy={onUndeploy} />
+        </tbody>
+      </table>,
+    );
+
+    const button = screen.getByRole("button", { name: "Undeploy… (analytics from prod)" });
+    expect(button).toHaveTextContent(/^Undeploy…/u);
+    await userEvent.click(button);
+    expect(onUndeploy).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds Undeploy… while something else runs, pointing at the note that says what", async () => {
+    const onUndeploy = vi.fn();
+    render(
+      <>
+        <p id="note">Rolling back analytics in prod to 4f9d2a7…</p>
+        <table>
+          <tbody>
+            <DeployRow
+              deploy={aDeploy()}
+              current
+              onRollBack={null}
+              onUndeploy={onUndeploy}
+              heldBy="note"
+            />
+          </tbody>
+        </table>
+      </>,
+    );
+
+    const button = screen.getByRole("button", { name: "Undeploy… (analytics from prod)" });
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).toHaveAccessibleDescription("Rolling back analytics in prod to 4f9d2a7…");
+    await userEvent.click(button);
+    expect(onUndeploy).not.toHaveBeenCalled();
+    expect(button).toHaveFocus();
+  });
 });
