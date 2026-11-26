@@ -12,6 +12,7 @@ import {
 } from "./access";
 import { apiTypes, typeOf } from "./api-types";
 import { ARTIFACTS_STUBBED, stubArtifacts } from "./artifacts";
+import { AUDIT_STUBBED, stubAudit } from "./audit";
 import { ROUTES, stubConnect } from "./connect";
 import { CONNECTIONS_STUBBED, stubConnections } from "./connections";
 import { ENVIRONMENTS_STUBBED, stubEnvironments } from "./environments";
@@ -88,6 +89,7 @@ const LITERAL_CODES: Record<string, string> = {
   ArtifactVersionDeletedOut: "actions",
   ArtifactVersionOut: "actions",
   AttentionItemOut: "kind",
+  AuditEventOut: "securable_kind",
   CheckResultOut: "outcome",
   ColumnOut: "description_source label_source",
   ConfigurationSettingOut: "source",
@@ -595,6 +597,24 @@ walk("Settings › Configuration marks hidden characters in values", async ({ pa
   await visit(page, "/settings/configuration", ["ops-admin", "/srv/lakana/raw"]);
   expectOnlyStubbed(paths, [...STUBBED, ...SIGN_IN_STUBBED]);
 });
+
+walk(
+  "Settings › Audit log marks hidden characters in names, objects and fields",
+  async ({ page }) => {
+    const paths = apiPaths(page);
+    await signInAsAdmin(poisoned(page));
+    await stubAudit(poisoned(page));
+    await visit(page, "/settings/audit", ["maria", "ben", "dev", "station_ranking"]);
+    const region = page.getByRole("region", { name: "Audit events" });
+    const show = region.getByRole("button", { name: /^Show details/ });
+    // Each press renames its button to Hide: the first one left is the next to press.
+    while ((await show.count()) > 0) {
+      await show.first().click();
+    }
+    await expectMarked(page, "the events' details", ["ben", "append", "gold.station_ranking"]);
+    expectOnlyStubbed(paths, [...STUBBED, ...AUDIT_STUBBED]);
+  },
+);
 
 walk(
   "the identity provider's name, issuer and a link's e-mail and name mark hidden characters",

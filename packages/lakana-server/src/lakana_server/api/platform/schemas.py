@@ -3077,6 +3077,8 @@ class AuditEventOut(BaseModel):
     principal_id
         The principal attributed to this event, or `None` for a failed
         authentication.
+    principal_name
+        That principal's name, or `None` when the event is attributed to nobody.
     event_type
         The kind of event; `UNKNOWN` for a type this release does not know, which a newer
         release wrote before a downgrade.
@@ -3100,6 +3102,7 @@ class AuditEventOut(BaseModel):
     id: uuid.UUID
     occurred_at: datetime
     principal_id: uuid.UUID | None
+    principal_name: str | None
     event_type: AuditEventType
     event_type_raw: str
     securable_kind: SecurableKind | None

@@ -887,3 +887,69 @@ def test_the_stored_type_column_passes_null_both_ways(session: Session) -> None:
 
     assert session.execute(select(cast(null(), stored))).scalar_one() is None
     assert stored.process_bind_param(None, session.get_bind().dialect) is None
+
+
+# --- who each event is attributed to, by name (#827) -------------------------------------------
+
+
+def test_each_event_names_its_principal(session: Session) -> None:
+    admin, bob = _person(session, "root"), _person(session, "bob")
+    _grant(session, admin, role=Role.ADMIN)
+    _query_completed(session, bob)
+    AuditService(session).record(None, AuditEventType.AUTHENTICATION_FAILED, commit=True)
+    page = AuditService(session, GrantAuthorization(session)).query(admin)
+    names = {(e.event_type, e.principal_name) for e in page.items}
+    assert (AuditEventType.QUERY_COMPLETED, "bob") in names
+    assert (AuditEventType.AUTHENTICATION_FAILED, None) in names
+
+
+def test_a_deactivated_principal_is_still_named(session: Session) -> None:
+    admin, bob = _person(session, "root"), _person(session, "bob")
+    _grant(session, admin, role=Role.ADMIN)
+    _query_completed(session, bob)
+    session.execute(text("UPDATE principals SET is_active = false WHERE name = 'bob'"))
+    session.commit()
+    page = AuditService(session, GrantAuthorization(session)).query(
+        admin, event_type=AuditEventType.QUERY_COMPLETED
+    )
+    assert [e.principal_name for e in page.items] == ["bob"]
+
+
+def test_a_filter_by_name_is_the_filter_on_that_principal(session: Session) -> None:
+    admin, bob, carol = _person(session, "root"), _person(session, "bob"), _person(session, "c")
+    _grant(session, admin, role=Role.ADMIN)
+    _query_completed(session, bob)
+    _query_completed(session, carol)
+    page = AuditService(session, GrantAuthorization(session)).query(admin, principal_name="bob")
+    assert [e.principal_id for e in page.items] == [bob.id]
+    [row] = _views(session)
+    assert row.detail["targeting_key"] == {"principal_id": str(bob.id)}
+
+
+def test_a_filter_by_the_readers_own_name_records_nothing(session: Session) -> None:
+    admin = _person(session, "root")
+    _grant(session, admin, role=Role.ADMIN)
+    _query_completed(session, admin)
+    page = AuditService(session, GrantAuthorization(session)).query(admin, principal_name="root")
+    assert len(page.items) == 1
+    assert _views(session) == []
+
+
+def test_a_filter_by_a_name_nobody_has_shows_nothing(session: Session) -> None:
+    admin, bob = _person(session, "root"), _person(session, "bob")
+    _grant(session, admin, role=Role.ADMIN)
+    _query_completed(session, bob)
+    page = AuditService(session, GrantAuthorization(session)).query(admin, principal_name="nobody")
+    assert page.items == []
+    assert page.next_cursor is None
+    assert _views(session) == []
+
+
+def test_a_filter_by_both_an_id_and_a_name_is_refused(session: Session) -> None:
+    admin, bob = _person(session, "root"), _person(session, "bob")
+    _grant(session, admin, role=Role.ADMIN)
+    with pytest.raises(ValidationError, match="principal_id or principal_name, not both"):
+        AuditService(session, GrantAuthorization(session)).query(
+            admin, principal_id=bob.id, principal_name="bob"
+        )
+    assert _views(session) == []

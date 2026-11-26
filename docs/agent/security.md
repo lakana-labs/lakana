@@ -6096,6 +6096,16 @@ already allows.
   their own row immediately instead (`AuditService.record(..., commit=True)`), because the
   action they would otherwise ride alongside never happened — there is nothing else about to
   commit in the same transaction.
+- **Each event names its principal, and the log filters by a name (#827).** `ShownAuditEvent`
+  carries `principal_name`, read for the page's principal ids in one query (`None` for an event
+  attributed to nobody); `?principal_name=NAME` is the `principal_id` filter of that principal, so its
+  `ACTIVITY_VIEWED` targeting key is the same `{"principal_id": id}` (none for the reader's own
+  name), a name nobody has matches no event and records nothing, and both filters at once are a
+  422. A name tells a reader of the log nothing new: the details already name principals
+  (`actor`, `principal`, `submitted_by` are in `SHOWN_FIELDS`). Settings › Audit log
+  (`ui/src/settings/AuditPage.tsx`, administrators only) shows the page as the server sends it:
+  a fingerprint as "Hidden: SHA-256 …, N characters", a withheld value as "Hidden", every server
+  string through `VisibleText`; it keeps nothing and polls nothing.
 - The read path is `GET /api/v1/audit-events`, gated by `Action.READ_AUDIT_LOG`. It returns
   `{items, next_cursor}`, newest first, at most `limit` (1–500, default 100) per page. The
   cursor is an opaque keyset position on `(occurred_at, id)`: it grants nothing, since every

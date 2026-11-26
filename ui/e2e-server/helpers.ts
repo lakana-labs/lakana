@@ -1046,6 +1046,45 @@ export async function savedQueriesAs(
 }
 
 /**
+ * Submits a query as the signed-in page's person, with the page's session and CSRF token, so that
+ * the run (and its `QUERY_COMPLETED` event) is the person's own.
+ *
+ * @param page - The page, signed in.
+ * @param environment - The environment.
+ * @param sql - The SQL text.
+ * @returns The run's id.
+ */
+export async function submitQueryAs(page: Page, environment: string, sql: string): Promise<string> {
+  const path = `/api/v1/environments/${environment}/queries`;
+  const response = await page.request.post(path, {
+    headers: await sessionHeaders(page),
+    data: { sql },
+  });
+  await ensureOk(`POST ${path}`, response);
+  return ((await response.json()) as { query_id: string }).query_id;
+}
+
+/**
+ * Reads the state of a run as the signed-in page's person, who submitted it: another person's run,
+ * the bootstrap administrator's included, answers 404.
+ *
+ * @param page - The page, signed in.
+ * @param environment - The environment.
+ * @param queryId - The run's id.
+ * @returns The state, such as `QUEUED` or `SUCCEEDED`.
+ */
+export async function queryStatusAs(
+  page: Page,
+  environment: string,
+  queryId: string,
+): Promise<string> {
+  const path = `/api/v1/environments/${environment}/queries/${queryId}`;
+  const response = await page.request.get(path, { headers: await sessionHeaders(page) });
+  await ensureOk(`GET ${path}`, response);
+  return ((await response.json()) as { status: string }).status;
+}
+
+/**
  * How many workers the server counts as alive, as the bootstrap administrator.
  *
  * @param request - The request context.
@@ -1064,7 +1103,8 @@ async function workersAlive(request: APIRequestContext): Promise<number> {
  * `playwright.server.config.ts`, and waits until the server counts it alive. The suite runs no
  * worker otherwise (Home's status box, a preview that stays queued); only a file whose work must
  * be carried out (`queries.spec.ts`, whose queries run, and `connection-tests.spec.ts`, whose
- * connection tests end) starts one, in its `beforeAll`, and stops it in its `afterAll`. Stopped with SIGTERM,
+ * connection tests end) starts one, in its `beforeAll`, and stops it in its `afterAll`; `audit.spec.ts`
+ * starts one inside the one test whose query must end. Stopped with SIGTERM,
  * the worker drains and removes its own heartbeat, so the server counts none again.
  *
  * `uv` starts `lakana-worker` as its child, so both run in a process group of their own
@@ -1240,4 +1280,46 @@ export async function jobNames(request: APIRequestContext, environment: string):
   });
   await ensureOk(`GET ${path}`, response);
   return ((await response.json()) as { name: string }[]).map((job) => job.name);
+}
+
+/** One audit event, as much of it as the tests read. */
+export interface AuditEventRead {
+  /** Its type. */
+  readonly event_type: string;
+  /** Its principal's name, or null. */
+  readonly principal_name: string | null;
+  /** Its fields. */
+  readonly detail: Record<string, unknown>;
+}
+
+/**
+ * Reads the newest page of the audit log as the bootstrap administrator's token.
+ *
+ * @param request - The request context.
+ * @param query - The route's filters, such as `{ event_type: "ACTIVITY_VIEWED" }`.
+ * @returns The events, newest first.
+ */
+export async function auditEvents(
+  request: APIRequestContext,
+  query: Record<string, string>,
+): Promise<readonly AuditEventRead[]> {
+  const response = await request.get("/api/v1/audit-events", {
+    headers: { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` },
+    params: query,
+  });
+  await ensureOk("GET /api/v1/audit-events", response);
+  return ((await response.json()) as { items: AuditEventRead[] }).items;
+}
+
+/**
+ * Creates a service account, as the bootstrap administrator.
+ *
+ * @param request - The request context.
+ * @param name - Its name.
+ */
+export async function createServiceAccount(
+  request: APIRequestContext,
+  name: string,
+): Promise<void> {
+  await create(request, "/api/v1/principals", { name, type: "SERVICE_ACCOUNT" });
 }

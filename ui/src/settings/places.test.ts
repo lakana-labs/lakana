@@ -87,6 +87,7 @@ describe("places", () => {
       "invites",
       "recovery-links",
       "configuration",
+      "audit",
     ]);
   });
 
@@ -94,10 +95,16 @@ describe("places", () => {
     expect(
       listedPlaces(ADMIN)
         .map((place) => place.id)
-        .slice(-4),
-    ).toEqual(["sign-in", "invites", "recovery-links", "configuration"]);
+        .slice(-5),
+    ).toEqual(["sign-in", "invites", "recovery-links", "configuration", "audit"]);
     expect(listedPlaces(KIM).map((place) => place.id)).not.toContain("configuration");
     expect(placeAt("/settings/configuration")?.id).toBe("configuration");
+  });
+
+  it("lists the Audit log to administrators only", () => {
+    expect(listedPlaces(ADMIN).at(-1)?.id).toBe("audit");
+    expect(listedPlaces(KIM).map((place) => place.id)).not.toContain("audit");
+    expect(placeAt("/settings/audit")?.id).toBe("audit");
   });
 
   it("lists Row filters & masks to a policy manager, and Access file to administrators only", () => {

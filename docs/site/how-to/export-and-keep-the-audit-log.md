@@ -85,6 +85,23 @@ Reading other people's events is itself recorded, unless `LAKANA_VIEW_AUDIT__ENA
 hour), and if that event cannot be written the read is refused. Take the right away from a person
 with `lakana grant revoke`. `lakana access explain NAME` shows what a principal may do.
 
+## Read the log in the web interface
+
+An administrator reads the log in **Settings › Audit log**: the events, newest first, 50 at a
+time with **Show more**. Press **When** to see the oldest first. Narrow the list by **Who** (a
+principal's name), **Event** (a type such as `GRANT_CREATED`; the field suggests the types),
+**Environment** and **Period** (the last 24 hours, 7 or 30 days, or all time; the last 30 days
+at first). The filters and the order stay in the page's address, so a link opens the same list.
+**Show details** opens an event's `detail`: of another person's event, without
+`READ_QUERY_TEXT`, a query's text reads "Hidden: SHA-256 …, N characters" and a withheld value
+"Hidden". Reading the list is recorded as `ACTIVITY_VIEWED`, as with `lakana audit list`.
+
+The page shows what the server sends and keeps nothing; to keep the log, export it as below.
+
+The page is listed only for an administrator. Someone who holds `READ_AUDIT_LOG` and nothing
+more, such as the `auditor` account above, does not get it and reads the log with
+`lakana audit list` or `GET /api/v1/audit-events`.
+
 ## Export the log
 
 `lakana audit list` pages through the events, newest first. With `--output json` each event
@@ -151,7 +168,9 @@ python3 -c 'import json; print(len(json.load(open("audit-all.json"))), "events")
 
 Without the CLI, the route is `GET /api/v1/audit-events` (the
 [REST API reference](../reference/rest-api.md)). It takes `event_type`, `kind`, `environment`,
-`principal_id`, `since`, `until`, `limit` (1 to 500, 100 by default) and `cursor`. The body is
+`principal_id` (or `principal_name`, a principal's name), `since`, `until`, `sort` and `order`
+(`desc`, the default, or `asc`), `limit` (1 to 500, 100 by default) and `cursor`; each event also
+carries `principal_name`, the name of its principal. The body is
 `{"items": [...], "next_cursor": ...}`; send the same filters with the `next_cursor` of the last
 page until it is `null`. It answers `403` without `READ_AUDIT_LOG` and `503` when a read that must
 be recorded could not be.

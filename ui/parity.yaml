@@ -46,7 +46,7 @@
 "artifact uploads list": { class: ui, part: 3, done: true }
 "artifact versions delete": { class: ui, part: 3, done: true }
 "artifact versions list": { class: ui, part: 3, done: true }
-"audit list": { class: ui, part: 8 }
+"audit list": { class: ui, part: 8, done: true }
 "bundle init": { class: git, reason: "local deployment tooling (compose.yaml, .env)" }
 "check list": { class: read, part: 5 }
 "check rows": { class: ui, part: 5, done: true }
@@ -306,7 +306,7 @@
     done: true,
   }
 "GET /api/v1/access/status": { class: read, part: 7, done: true }
-"GET /api/v1/audit-events": { class: ui, part: 8 }
+"GET /api/v1/audit-events": { class: ui, part: 8, done: true }
 "GET /api/v1/ci-trust-rules": { class: ui, part: 7 }
 "GET /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7 }
 "GET /api/v1/column-masks":

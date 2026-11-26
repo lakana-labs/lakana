@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 
 import { stubAccess, stubPolicies, stubSignInAndConfiguration, stubTokensSecrets } from "./access";
+import { stubAudit } from "./audit";
 import { PROD, stubConnections, WAREHOUSE } from "./connections";
 import { stubEnvironments } from "./environments";
 import { FAILED_ID, stubJobs, TIMED_OUT } from "./jobs";
@@ -376,6 +377,7 @@ const TOOLBARS: readonly [string, (page: Page) => Promise<unknown>, string, bool
   ["Invites", admin(stubSignInAndConfiguration), "/settings/sign-in/invites", true],
   ["Recovery links", admin(stubSignInAndConfiguration), "/settings/sign-in/recovery-links", true],
   ["Configuration", admin(stubSignInAndConfiguration), "/settings/configuration", true],
+  ["Audit log", admin(stubAudit), "/settings/audit", true],
 ];
 
 for (const [name, stub, path, counted] of TOOLBARS) {
