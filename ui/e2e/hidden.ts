@@ -80,7 +80,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["actions","address","created_at","created_by","declared_by","environment","kind","last_test","name","secret","settings","updated_at"]':
     "ConnectionOut",
   '["actions","name"]': "ConnectionEnvironmentOut",
-  '["actions","commit_sha","cron","downstream","environment","last_run_at","last_run_id","last_run_status","name","next_run_at","notify","paused","repository","select","source_url","state","timezone","triggers","upstream","waiting_for","waiting_since","waiting_trigger","waits_for_run_id"]':
+  '["actions","commit_sha","cron","downstream","environment","last_run_at","last_run_id","last_run_status","name","next_run_at","notify","paused","paused_at","paused_by","repository","select","source_url","state","timezone","triggers","upstream","waiting_for","waiting_since","waiting_trigger","waits_for_run_id"]':
     "JobOut",
   '["actions","count","name","namespaces"]': "TableTreeOut.environments",
   '["actions","count","path"]': "TableTreeOut.environments.namespaces",

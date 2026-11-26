@@ -5647,6 +5647,12 @@ class JobOut(BaseModel):
         ``no run principal`` or ``run principal unusable``.
     paused
         Whether the schedule is paused.
+    paused_by
+        The name of the principal that paused the schedule, shown to every reader of the
+        environment as a run's `triggered_by` is; null when it is not paused or that principal
+        was deleted.
+    paused_at
+        When the schedule was paused; null when it is not paused.
     next_run_at
         The next scheduled time (UTC), or null.
     next_run_local
@@ -5717,6 +5723,8 @@ class JobOut(BaseModel):
     commit_sha: str
     source_url: str | None
     notify: NotifyOut | None = None
+    paused_by: str | None = None
+    paused_at: datetime | None = None
 
 
 class TaskAttemptOut(BaseModel):

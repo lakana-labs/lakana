@@ -86,6 +86,8 @@ Answer fields: `JobOut`
 | `commit_sha` | text | yes |  |
 | `source_url` | text or null | yes |  |
 | `notify` | `NotifyOut` or null | no |  |
+| `paused_by` | text or null | no |  |
+| `paused_at` | text (date-time) or null | no |  |
 
 ## `POST /api/v1/environments/{env}/jobs/{job}/runs`
 
@@ -186,6 +188,8 @@ Answer fields: `JobOut`
 | `commit_sha` | text | yes |  |
 | `source_url` | text or null | yes |  |
 | `notify` | `NotifyOut` or null | no |  |
+| `paused_by` | text or null | no |  |
+| `paused_at` | text (date-time) or null | no |  |
 
 ## `POST /api/v1/environments/{env}/jobs/{job}/resume`
 
@@ -246,6 +250,8 @@ Answer fields: `JobOut`
 | `commit_sha` | text | yes |  |
 | `source_url` | text or null | yes |  |
 | `notify` | `NotifyOut` or null | no |  |
+| `paused_by` | text or null | no |  |
+| `paused_at` | text (date-time) or null | no |  |
 
 ## `POST /api/v1/environments/{env}/jobs/{job}/notify-test`
 
