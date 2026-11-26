@@ -12,6 +12,7 @@ from collections.abc import Iterable, Sequence
 from fastapi import APIRouter, Depends, Query, Request, Response
 
 from lakana_core.auth import AuthorizationService, PrincipalRef
+from lakana_core.errors import ValidationError
 from lakana_core.models import DeployKind
 from lakana_core.projects.deploys import DeploymentView, DeployRunView, DeployService
 from lakana_core.runs.operator import deploy_actions, operator_rights_each
@@ -381,6 +382,8 @@ def clear_run_as(
 def undeploy(
     env: str,
     repo: str,
+    request: Request,
+    expected_project_version_id: uuid.UUID | None = Query(default=None),
     principal: PrincipalRef = Depends(get_principal),
     service: DeployService = Depends(get_deploy_service),
 ) -> Response:
@@ -388,8 +391,9 @@ def undeploy(
 
     Removes the repository's deployment and its binding in the environment; the tables and
     data stay. Needs `DEPLOY` on the environment; a CI token is always refused. Answers 404
-    when the environment, repository or deployment does not exist and 409 while a run of the
-    repository is queued or running.
+    when the environment, repository or deployment does not exist, and 409 while a run, or a
+    deploy or rollback, of the repository is queued or running there, and when the deployment
+    is not at `expected_project_version_id` (optional: the project version the caller saw).
 
     Parameters
     ----------
@@ -397,6 +401,10 @@ def undeploy(
         Environment name.
     repo
         Repository name.
+    request
+        The current request, to refuse a repeated `expected_project_version_id`.
+    expected_project_version_id
+        The project version the caller saw as current; omitted, whatever is current goes.
     principal
         The authenticated caller.
     service
@@ -406,8 +414,15 @@ def undeploy(
     -------
     Response
         204, no body.
+
+    Raises
+    ------
+    ValidationError
+        If `expected_project_version_id` is sent more than once.
     """
-    service.undeploy(principal, env, repo)
+    if len(request.query_params.getlist("expected_project_version_id")) > 1:
+        raise ValidationError("expected_project_version_id must be sent at most once.")
+    service.undeploy(principal, env, repo, expected_project_version_id=expected_project_version_id)
     return Response(status_code=204)
 
 

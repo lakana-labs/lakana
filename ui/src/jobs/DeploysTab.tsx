@@ -348,6 +348,7 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
           <UndeployDialog
             environment={environment}
             repository={undeploying.repository}
+            projectVersionId={undeploying.project_version_id}
             runAs={undeploying.run_as}
             protectedEnvironment={protectedEnvironment}
             onDone={() => {

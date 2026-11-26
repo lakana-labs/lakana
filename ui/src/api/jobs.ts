@@ -802,13 +802,28 @@ export function rollBack(
  *
  * @param environment - The environment.
  * @param repository - The repository.
+ * @param projectVersionId - The project version the person saw as current: the server refuses
+ *   the undeploy if the deployment points at another one by then. Omitted, whatever is current
+ *   goes.
  * @returns Nothing.
  * @throws {ApiError} for a refusal; 403 without `DEPLOY` or for a CI token, 404 for a repository
- *   not deployed there, 409 while a run of it is queued or running there.
+ *   not deployed there, 409 while a run, deploy or rollback of it is queued or running there, or
+ *   when its deployment is no longer at `projectVersionId`.
  */
-export async function undeploy(environment: string, repository: string): Promise<void> {
+export async function undeploy(
+  environment: string,
+  repository: string,
+  projectVersionId?: string,
+): Promise<void> {
+  const query = new URLSearchParams();
+  if (projectVersionId !== undefined) {
+    query.set("expected_project_version_id", projectVersionId);
+  }
   await api.request<undefined>(
     "DELETE",
-    environmentPath(environment, `/deployments/${encodeURIComponent(repository)}`),
+    withQuery(
+      environmentPath(environment, `/deployments/${encodeURIComponent(repository)}`),
+      query,
+    ),
   );
 }

@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 import lakana
-from lakana.errors import DeployFailed, NotFound
+from lakana.errors import Conflict, DeployFailed, NotFound
 from lakana_core.models import DeployRun, DeployStatus
 from tests.server_test_helpers import create_environment
 
@@ -62,7 +62,14 @@ def test_run_as_and_undeploy(lakana_client: lakana.Client, client: TestClient) -
     assert lakana_client.deployments.set_run_as("dev", "analytics", "etl").run_as == "etl"
     assert lakana_client.deployments.list("dev")[0].run_as == "etl"
     assert lakana_client.deployments.clear_run_as("dev", "analytics").run_as is None
-    lakana_client.deployments.undeploy("dev", "analytics")
+    (deployment,) = lakana_client.deployments.list("dev")
+    with pytest.raises(Conflict, match="changed since you read it"):
+        lakana_client.deployments.undeploy(
+            "dev", "analytics", expected_project_version_id=str(uuid.uuid4())
+        )
+    lakana_client.deployments.undeploy(
+        "dev", "analytics", expected_project_version_id=str(deployment.project_version_id)
+    )
     assert lakana_client.deployments.list("dev") == []
     with pytest.raises(NotFound):
         lakana_client.deployments.undeploy("dev", "analytics")

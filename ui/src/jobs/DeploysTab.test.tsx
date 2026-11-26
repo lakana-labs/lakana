@@ -550,6 +550,11 @@ describe("DeploysTab", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
+    // It names the version the row showed as current, so a deployment moved since is refused.
+    const asked = server.sent.find((each) => each.method === "DELETE");
+    expect(asked?.path).toBe(
+      `/api/v1/environments/prod/deployments/analytics?expected_project_version_id=${aDeployment().project_version_id}`,
+    );
 
     // The deployment is gone: nothing of analytics is offered, and the note has the focus.
     const said = "Undeployed analytics from prod. Its tables stay, as orphans.";
