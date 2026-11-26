@@ -54,7 +54,7 @@
     "unboundProtected": "No account: runs are refused until one is bound",
     "unbound": "No account: runs started by a person write as that person; schedules do not run",
     "set": "Set run-as",
-    "setOf": "Set the run-as account of {{repository}}",
+    "setOf": "Set run-as for {{repository}}",
     "change": "Change",
     "changeOf": "Change the run-as account of {{repository}}",
     "clear": "Clear",

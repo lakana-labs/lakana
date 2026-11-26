@@ -113,8 +113,8 @@ for (const theme of ["light", "dark"] as const) {
 
       await press(page, page.getByRole("button", { name: "Add rule" }));
       const add = page.getByRole("dialog", { name: "Add a CI trust rule" });
-      await choose(page, add.getByRole("button", { name: /^Environment/ }), "prod");
-      await choose(page, add.getByRole("button", { name: /^Repository/ }), "dbt-models");
+      await choose(page, add.getByRole("button", { name: /Environment$/ }), "prod");
+      await choose(page, add.getByRole("button", { name: /Repository$/ }), "dbt-models");
       await typeInto(page, add.getByRole("combobox", { name: "Acts as" }), "ci-prod");
       await page.keyboard.press("Escape");
       await typeInto(page, add.getByRole("textbox", { name: "Value of claim 1" }), "654321");
@@ -166,7 +166,7 @@ for (const theme of ["light", "dark"] as const) {
 
       await press(
         page,
-        page.getByRole("button", { name: "Delete the rule for analytics to prod" }),
+        page.getByRole("button", { name: "Delete rule for analytics to prod" }),
       );
       const remove = page.getByRole("dialog", { name: "Delete the rule for analytics to prod?" });
       expect(await violations(page), "Delete").toEqual([]);
@@ -194,8 +194,8 @@ for (const theme of ["light", "dark"] as const) {
       ).toBeVisible();
       await tabTo(page, page.getByRole("textbox", { name: "Claims" }));
       await page.keyboard.insertText(CLAIMS);
-      await choose(page, page.getByRole("button", { name: /^Environment/ }), "prod");
-      await choose(page, page.getByRole("button", { name: /^Repository/ }), "analytics");
+      await choose(page, page.getByRole("button", { name: /Environment$/ }), "prod");
+      await choose(page, page.getByRole("button", { name: /Repository$/ }), "analytics");
       await press(page, page.getByRole("button", { name: "Explain" }));
       const verdict = page.getByRole("region", { name: "Verdict" });
       await expect(verdict.getByText("Accepted")).toBeVisible();
@@ -229,7 +229,7 @@ for (const theme of ["light", "dark"] as const) {
       const region = page.getByRole("region", { name: "Deployments in dev" });
       await expect(region.getByText(/No account: runs started by a person/)).toBeVisible();
 
-      await press(page, page.getByRole("button", { name: "Set the run-as account of analytics" }));
+      await press(page, page.getByRole("button", { name: "Set run-as for analytics" }));
       const dialog = page.getByRole("dialog", {
         name: "Set the run-as account of analytics in dev",
       });
@@ -252,7 +252,7 @@ for (const theme of ["light", "dark"] as const) {
       expect(await violations(page), "Clear run-as").toEqual([]);
       await press(page, clear.getByRole("button", { name: "Clear" }));
       await expect(
-        page.getByRole("button", { name: "Set the run-as account of analytics" }),
+        page.getByRole("button", { name: "Set run-as for analytics" }),
       ).toBeFocused();
       expect(sent).toEqual([
         "POST /api/v1/sign-in/step-up/options",

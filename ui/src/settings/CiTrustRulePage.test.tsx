@@ -249,7 +249,7 @@ describe("CiTrustRulePage", () => {
     });
 
     await user.click(
-      await screen.findByRole("button", { name: "Delete the rule for analytics to prod" }),
+      await screen.findByRole("button", { name: "Delete rule for analytics to prod" }),
     );
     const dialog = await screen.findByRole("dialog", {
       name: "Delete the rule for analytics to prod?",
@@ -273,7 +273,7 @@ describe("CiTrustRulePage", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Edit the rule/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Disable the rule/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: /Delete the rule/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Delete rule for/ })).toBeNull();
   });
 
   it("says why nothing can be changed when the managed scopes cannot be read", async () => {

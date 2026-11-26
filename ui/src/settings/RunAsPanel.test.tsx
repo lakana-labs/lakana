@@ -88,7 +88,7 @@ describe("RunAsPanel", () => {
     });
 
     await user.click(
-      await screen.findByRole("button", { name: "Set the run-as account of analytics" }),
+      await screen.findByRole("button", { name: "Set run-as for analytics" }),
     );
     const dialog = await screen.findByRole("dialog", {
       name: "Set the run-as account of analytics in prod",
@@ -118,7 +118,7 @@ describe("RunAsPanel", () => {
     const { user } = prodPage({ [`PUT ${RUN_AS}`]: answer.route });
 
     await user.click(
-      await screen.findByRole("button", { name: "Set the run-as account of analytics" }),
+      await screen.findByRole("button", { name: "Set run-as for analytics" }),
     );
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByRole("combobox", { name: "Service account" }), "maria");
@@ -165,7 +165,7 @@ describe("RunAsPanel", () => {
     expect(
       await screen.findByText("Runs of analytics in prod write as no account now."),
     ).toBeVisible();
-    const set = await screen.findByRole("button", { name: "Set the run-as account of analytics" });
+    const set = await screen.findByRole("button", { name: "Set run-as for analytics" });
     await waitFor(() => {
       expect(set).toHaveFocus();
     });

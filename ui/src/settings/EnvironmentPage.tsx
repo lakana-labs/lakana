@@ -48,7 +48,6 @@ import { EnvironmentUsage } from "./EnvironmentUsage";
 import { managesEnvironment, mayCreateEnvironments } from "./places";
 import "./settingsStrings";
 import { storageSummary } from "./storageSummary";
-import { RunAsPanel } from "./RunAsPanel";
 import { useLeave } from "./useLeave";
 import { useReloadViewer, useSettingsViewer } from "./viewer";
 
@@ -76,6 +75,9 @@ const DeleteEnvironmentDialog: ComponentType<DeleteEnvironmentDialogProps> = laz
 }));
 
 // Leftover directories load on their own, only for those who manage environments on the instance.
+// The deployments and their run-as accounts load on their own, with their dialogs.
+const RunAsPanel = lazy(async () => ({ default: (await import("./RunAsPanel")).RunAsPanel }));
+
 const LeftoverDirectories = lazy(async () => ({
   default: (await import("./LeftoverDirectories")).LeftoverDirectories,
 }));
@@ -440,11 +442,13 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
               protectButton={protectButton}
             />
             {manages && <EnvironmentUsage name={environment.name} paused={deleting} />}
-            <RunAsPanel
-              environment={environment.name}
-              isProtected={environment.is_protected}
-              manages={manages}
-            />
+            <Suspense fallback={null}>
+              <RunAsPanel
+                environment={environment.name}
+                isProtected={environment.is_protected}
+                manages={manages}
+              />
+            </Suspense>
             {creates && (
               <StoragePanel
                 environment={environment}

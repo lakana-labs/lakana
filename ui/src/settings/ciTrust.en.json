@@ -66,7 +66,7 @@
     "disabledNote": "Disabled. No CI job is accepted under it.",
     "savedNote": "Saved. The tokens issued under the rule before have ended.",
     "delete": "Delete rule",
-    "deleteOf": "Delete the rule for {{repository}} to {{environment}}",
+    "deleteOf": "Delete rule for {{repository}} to {{environment}}",
     "deleteTitle": "Delete the rule for {{repository}} to {{environment}}?",
     "deleteText": "CI jobs are no longer accepted under it, and the tokens issued under it end now. To stop it for a while, disable it instead.",
     "deleteConfirm": "Delete rule",

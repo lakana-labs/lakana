@@ -225,6 +225,18 @@ export const READ_AS: Readonly<Record<string, string>> = {
   "[]": "-",
   // An environment's properties (Settings › Environments): keys and values are data.
   '["cost-centre"]': "-",
+  // CI trust: a rule, its claims (names and values are data), the repositories a rule may name,
+  // and Explain's report.
+  '["conditions","created_at","created_by","enabled","environment","id","issuer","kinds","principal","repository","start_on_deploy_jobs","updated_at","updated_by"]':
+    "CiTrustRuleOut",
+  // A rule's claims fit a partial type best; neither type has a code among the claims' names,
+  // so every claim still carries the override.
+  '["environment","event_name","ref","repository_id"]': "RecentOut",
+  '["environment","repository_id"]': "WorkEnvironmentOut",
+  '["created_at","credential_secret","credential_username","default_ref","deploy_keys","id","kind","name","ssh_known_hosts","updated_at","url"]':
+    "RepositoryOut",
+  '["environment","issuer","matching","repository","rules","verdict"]': "CiTrustExplainOut",
+  '["matches","reasons","rule_id"]': "CiTrustRuleExplanationOut",
   '["actions","commit_subject","created_at","environment","error_message","finished_at","id","jobs","kind","project_version_id","repository","requested_ref","resolved_sha","started_at","status","submitted_by"]':
     "DeployOut",
   '["commit_sha","project_version_id","repository","run_as","updated_at"]': "DeploymentOut",

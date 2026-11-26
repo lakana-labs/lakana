@@ -789,9 +789,9 @@ export const SHOTS: readonly Shot[] = [
       await page
         .getByRole("textbox", { name: "Claims" })
         .fill('{"iss": "https://token.actions.githubusercontent.com", "ref": "refs/heads/main"}');
-      await page.getByRole("button", { name: /^Environment/ }).click();
+      await page.getByRole("button", { name: /Environment$/ }).click();
       await page.getByRole("option", { name: /^prod/ }).click();
-      await page.getByRole("button", { name: /^Repository/ }).click();
+      await page.getByRole("button", { name: /Repository$/ }).click();
       await page.getByRole("option", { name: "analytics" }).click();
       await page.getByRole("button", { name: "Explain" }).click();
       await expect(page.getByRole("region", { name: "Every rule" })).toBeVisible();

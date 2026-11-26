@@ -89,6 +89,8 @@ const LITERAL_CODES: Record<string, string> = {
   ArtifactVersionOut: "actions",
   AttentionItemOut: "kind",
   CheckResultOut: "outcome",
+  CiTrustRuleCreate: "kinds",
+  CiTrustRuleOut: "kinds",
   ColumnOut: "description_source label_source",
   ConfigurationSettingOut: "source",
   ConnectionCreateIn: "kind",
@@ -791,7 +793,7 @@ walk("CI trust, a rule and Explain mark hidden characters", async ({ page }) => 
   await expect(page.getByRole("dialog")).toBeVisible();
   await page
     .getByRole("dialog")
-    .getByRole("button", { name: /^Environment/ })
+    .getByRole("button", { name: /Environment$/ })
     .click();
   await expect(page.getByRole("listbox")).toContainText("prodU+202E");
   await expectNoRaw(page, "Add rule's environments");
@@ -799,7 +801,7 @@ walk("CI trust, a rule and Explain mark hidden characters", async ({ page }) => 
   await expect(page.getByRole("listbox")).toBeHidden();
   await page
     .getByRole("dialog")
-    .getByRole("button", { name: /^Repository/ })
+    .getByRole("button", { name: /Repository$/ })
     .click();
   await expect(page.getByRole("listbox")).toContainText("dbt-modelsU+202E");
   await expectNoRaw(page, "Add rule's repositories");
@@ -820,7 +822,7 @@ walk("CI trust, a rule and Explain mark hidden characters", async ({ page }) => 
   await expectMarked(page, "Edit a rule", ["analytics", "dev"]);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toBeHidden();
-  await page.getByRole("button", { name: /^Delete the rule for analytics/ }).click();
+  await page.getByRole("button", { name: /^Delete rule for analytics/ }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expectMarked(page, "Delete a rule", ["analytics", "dev"]);
   await page.keyboard.press("Escape");
@@ -828,9 +830,9 @@ walk("CI trust, a rule and Explain mark hidden characters", async ({ page }) => 
 
   await page.goto("/settings/ci-trust/explain");
   await page.getByRole("textbox", { name: "Claims" }).fill('{"ref": "refs/heads/main"}');
-  await page.getByRole("button", { name: /^Environment/ }).click();
+  await page.getByRole("button", { name: /Environment$/ }).click();
   await page.getByRole("option", { name: /^prod/ }).click();
-  await page.getByRole("button", { name: /^Repository/ }).click();
+  await page.getByRole("button", { name: /Repository$/ }).click();
   await page.getByRole("option", { name: /^analytics/ }).click();
   await page.getByRole("button", { name: "Explain" }).click();
   await expect(page.getByRole("region", { name: "Verdict" })).toBeVisible();
