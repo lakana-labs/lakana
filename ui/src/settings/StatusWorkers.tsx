@@ -14,12 +14,12 @@ import { StatusGlyph } from "../status/StatusGlyph";
 import "./statusStrings";
 
 /**
- * A number of bytes in GiB with one decimal, without the unit.
+ * A number of bytes in GiB, without the unit; the message writes it with one decimal.
  *
  * @param bytes - The number of bytes.
- * @returns The number, such as "1.2".
+ * @returns The number, such as 1.2.
  */
-const inGib = (bytes: number): string => (bytes / 2 ** 30).toFixed(1);
+const inGib = (bytes: number): number => bytes / 2 ** 30;
 
 /** The word for the work a worker takes, by its code. */
 const TAKES = {

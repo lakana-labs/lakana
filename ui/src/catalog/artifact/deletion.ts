@@ -41,7 +41,10 @@ function keptClause(t: TFunction, language: string, kept: ArtifactKeptOut): stri
     case "other_version":
       return kept.version === null
         ? t("table.artifact.delete.keptByAnother", { amount: words })
-        : t("table.artifact.delete.keptByVersion", { amount: words, version: kept.version });
+        : t("table.artifact.delete.keptByVersion", {
+            amount: words,
+            version: String(kept.version),
+          });
     case "open_upload":
       return t("table.artifact.delete.keptByUpload", { amount: words });
     default:
@@ -68,7 +71,7 @@ export function deletionWords(
   deleted: ArtifactVersionDeletedOut,
 ): string {
   const head = t("table.artifact.delete.deleted", {
-    version: deleted.version,
+    version: String(deleted.version),
     artifact: markedText(artifact),
     freed:
       deleted.freed_files === 0

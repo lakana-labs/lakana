@@ -173,7 +173,9 @@ const NAMED_LIMITS = [
   // tabs and of a job's link to its repository's deploys.
   // The row is written out here rather than through shell/SectionTabs.tsx, which the table page
   // uses: shared, it would be a chunk of its own that the first load's preload list names.
-  { name: "Jobs", prefix: "JobsScreen-", limit: "4.19 kB" },
+  // Raised to the measured 4.20 kB (2026-11-26) + 10 %: durations under 10 s take their one
+  // decimal from the message's number format for the language (#59), not from toFixed.
+  { name: "Jobs", prefix: "JobsScreen-", limit: "4.62 kB" },
   // Measured 4.75 kB (2026-11-18) + 10 %: the Jobs list at /jobs, loaded on demand: the
   // environment filter (remembered, in the address) and the search, Running now (the first 50
   // queued and running runs with their progress and Cancel), Failed, needs attention (the
