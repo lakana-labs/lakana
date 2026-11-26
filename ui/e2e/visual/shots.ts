@@ -11,7 +11,7 @@ import { stubArtifacts } from "../artifacts";
 import { stubConnect } from "../connect";
 import { stubConnections } from "../connections";
 import { stubEnvironments } from "../environments";
-import { FAILED_ID, MISSING_ID, stubJobs, TIMED_OUT } from "../jobs";
+import { FAILED_ID, keepRollbackRunning, MISSING_ID, stubJobs, TIMED_OUT } from "../jobs";
 import { stubManagement } from "../manage";
 import { stubPlaces } from "../places";
 import { SALES_SQL, stubQueries, WEEKLY } from "../queries";
@@ -605,6 +605,17 @@ export const SHOTS: readonly Shot[] = [
     ready: text("Waits for silver.orders to finish."),
     act: dialog("Pause schedule"),
   },
+  {
+    name: "job-paused",
+    stub: stubJobs,
+    path: "/jobs/prod/job/analytics/daily_sales",
+    ready: text("Waits for silver.orders to finish."),
+    act: async (page) => {
+      await dialog("Pause schedule")(page);
+      await page.getByRole("dialog").getByRole("button", { name: "Pause schedule" }).click();
+      await expect(page.getByText(/· paused since .+ by admin$/)).toBeVisible();
+    },
+  },
   { name: "run", stub: stubJobs, path: RUN, ready: text(TIMED_OUT), phone: true },
   {
     name: "run-task",
@@ -624,6 +635,27 @@ export const SHOTS: readonly Shot[] = [
     path: "/jobs/deploys?environment=prod",
     ready: text("ana.nowak"),
     act: dialog(/^Roll back to this… \(analytics/),
+  },
+  {
+    // A rollback followed: every Roll back to this… held, the one pressed focused by keyboard.
+    name: "jobs-rollback-held",
+    stub: async (page) => {
+      await stubJobs(page);
+      await keepRollbackRunning(page);
+    },
+    path: "/jobs/deploys?environment=prod",
+    ready: text("ana.nowak"),
+    act: async (page) => {
+      await page
+        .getByRole("button", { name: /^Roll back to this… \(analytics/ })
+        .first()
+        .focus();
+      await page.keyboard.press("Enter");
+      const ask = page.getByRole("dialog");
+      await ask.getByRole("button", { name: "Roll back", exact: true }).focus();
+      await page.keyboard.press("Enter");
+      await expect(page.getByText(/^Rolling back analytics in prod to /)).toBeVisible();
+    },
   },
 
   // Connections.

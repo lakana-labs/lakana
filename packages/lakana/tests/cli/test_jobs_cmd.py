@@ -242,10 +242,52 @@ def test_show_of_a_paused_schedule_and_of_a_job_without_one(tmp_path: Path) -> N
         invoke(make_state(tmp_path, api), "job", "show", "sleepy", "--env", "dev").stdout
     )
     assert "paused" in sleepy and "next run" not in sleepy
+    assert "Paused since" not in sleepy
     manual = _plain(
         invoke(make_state(tmp_path, api), "job", "show", "manual", "--env", "dev").stdout
     )
     assert "schedule 0" not in manual and "on demand" in manual
+
+
+def test_show_says_who_paused_the_schedule_and_since_when(tmp_path: Path) -> None:
+    """A line names the pauser and the time; a deleted pauser is said so; JSON carries both."""
+    api = FakeApi()
+    paused = {
+        "kind": "schedule",
+        "cron": "0 6 * * *",
+        "timezone": "UTC",
+        "paused": True,
+        "next_run_at": None,
+    }
+    common = {"paused": True, "state": "paused", "triggers": [paused, {"kind": "on_demand"}]}
+    api.on(
+        "GET",
+        f"{_JOBS}/sleepy",
+        json=_job(
+            "sleepy",
+            **common,
+            paused_by="maria.keller",
+            paused_at="2026-10-14T08:30:00+00:00",
+        ),
+    )
+    api.on(
+        "GET",
+        f"{_JOBS}/orphan",
+        json=_job("orphan", **common, paused_by=None, paused_at="2026-10-14T08:30:00+00:00"),
+    )
+    shown = _plain(
+        invoke(make_state(tmp_path, api), "job", "show", "sleepy", "--env", "dev").stdout
+    )
+    assert "Paused since 2026-10-14 08:30 UTC by maria.keller." in shown
+    orphan = _plain(
+        invoke(make_state(tmp_path, api), "job", "show", "orphan", "--env", "dev").stdout
+    )
+    assert "Paused since 2026-10-14 08:30 UTC by an account since deleted." in orphan
+    as_json = invoke(
+        make_state(tmp_path, api), "--output", "json", "job", "show", "sleepy", "--env", "dev"
+    )
+    data = json.loads(as_json.stdout)
+    assert (data["paused_by"], data["paused_at"]) == ("maria.keller", "2026-10-14T08:30:00+00:00")
 
 
 _NOTIFY = {

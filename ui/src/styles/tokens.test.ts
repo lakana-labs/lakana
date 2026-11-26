@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -15,6 +15,47 @@ import {
 } from "../test/palette";
 
 const modes = Object.keys(PALETTES);
+
+/** The source folder, whose stylesheets the held-control test reads. */
+const SRC = resolve(import.meta.dirname, "..");
+
+/** A held control's attribute in any of its forms: `[aria-disabled]`, `="true"`, `='true'`, `=true`. */
+const HELD = /\[\s*aria-disabled\s*(?:=\s*(["']?)true\1\s*)?\]/;
+
+/**
+ * Every rule of the interface's stylesheets for a held control: one marked `aria-disabled`, which
+ * (unlike a disabled one, `[data-disabled]` with the `disabled` attribute) keeps the focus, so its
+ * ring is seen.
+ *
+ * @param css - A stylesheet's text, by default every one under `src/`.
+ * @returns Each rule's file, selector and declarations.
+ */
+function heldRules(css?: string): { file: string; selector: string; body: string }[] {
+  const sheets =
+    css === undefined
+      ? readdirSync(SRC, { recursive: true, encoding: "utf8" })
+          .filter((name) => name.endsWith(".css"))
+          .map((file) => ({ file, text: readFileSync(resolve(SRC, file), "utf8") }))
+      : [{ file: "given", text: css }];
+  return sheets.flatMap(({ file, text }) =>
+    [...text.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .map((match) => ({ file, selector: (match[1] ?? "").trim(), body: match[2] ?? "" }))
+      .filter((rule) => HELD.test(rule.selector)),
+  );
+}
+
+/**
+ * What a held rule must not do: dim (an opacity, a filter) or restyle the focus ring (an outline
+ * of its own), each of which would take the ring below the accent's contrast.
+ *
+ * @param body - The rule's declarations.
+ * @returns The properties it sets that it must not.
+ */
+function heldFaults(body: string): string[] {
+  return [...body.matchAll(/(?<![-\w])(opacity|filter|outline(?:-[\w-]+)?)\s*:/g)].map(
+    (match) => match[1] ?? "",
+  );
+}
 
 describe("tokens", () => {
   it.each(modes)("body text reaches AAA on ground and surface (%s)", (mode) => {
@@ -74,6 +115,53 @@ describe("tokens", () => {
     expect(palette["--color-accent-hover"]).not.toBe(palette["--color-accent"]);
     expect(contrast(palette, "--color-accent-hover", "--color-surface")).toBeGreaterThanOrEqual(3);
   });
+
+  it("finds the rules of held controls in every form of the attribute", () => {
+    expect(heldRules().map((rule) => rule.file)).toContain("jobs/jobs.css");
+    const forms = [
+      '.a[aria-disabled="true"] { color: red; }',
+      ".a[aria-disabled='true'] { color: red; }",
+      ".a[aria-disabled=true] { color: red; }",
+      ".a[aria-disabled] { color: red; }",
+    ];
+    for (const css of forms) {
+      expect(heldRules(css), css).toHaveLength(1);
+    }
+    expect(heldRules(".a[data-disabled] { opacity: 0.6; }")).toEqual([]);
+  });
+
+  it("names a held rule's opacity, filter or outline as a fault", () => {
+    expect(heldFaults("opacity: var(--x); filter: opacity(0.6); outline-color: red;")).toEqual([
+      "opacity",
+      "filter",
+      "outline-color",
+    ]);
+    expect(heldFaults("border-color: var(--color-line); color: var(--color-text-faint);")).toEqual(
+      [],
+    );
+  });
+
+  it.each(modes)(
+    "a held control is never dimmed, its ring the accent at 3:1 and its label at 4.5:1 (%s)",
+    (mode) => {
+      const palette = PALETTES[mode] ?? {};
+      for (const ground of ["--color-ground", "--color-surface"]) {
+        expect(
+          contrast(palette, "--color-accent", ground),
+          `ring on ${ground}`,
+        ).toBeGreaterThanOrEqual(3);
+      }
+      for (const { file, selector, body } of heldRules()) {
+        const where = `${file}: ${selector}`;
+        expect(heldFaults(body), where).toEqual([]);
+        const label = /(?<![-\w])color\s*:\s*var\((--[\w-]+)\)/.exec(body)?.[1] ?? "--color-text";
+        expect(
+          contrast(palette, label, "--color-surface"),
+          `${where}: label`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    },
+  );
 
   it("hovers the primary button with the token, never a filter", () => {
     const signIn = readFileSync(resolve(import.meta.dirname, "../sign-in/sign-in.css"), "utf8");

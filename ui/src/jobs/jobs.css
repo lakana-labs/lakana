@@ -207,12 +207,6 @@
   white-space: nowrap;
 }
 
-/* The sentence of an empty list, which takes the focus when Read again finds no run. */
-.jobs-tab-page .empty:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-offset);
-}
-
 /* The line that says the Runs tab stopped reading again, with Read again beside it. */
 .jobs-again {
   display: flex;
@@ -261,10 +255,13 @@
   color: var(--color-text-muted);
 }
 
-/* Roll back to this… while a rollback runs: dimmed, as a disabled menu item is, and unchanged on
-   hover; its description is the note that says what runs. */
+/* Roll back to this… while a rollback runs: its label faint and its edge a hairline, and unchanged
+   on hover; its description is the note that says what runs. It keeps the focus, so only the
+   label and the edge are quieter, never the whole button: an opacity would dim its focus ring
+   below 3:1 (tokens.test.ts). */
 .jobs-deploys-scroll .button[aria-disabled="true"] {
-  opacity: 0.6;
+  border-color: var(--color-line);
+  color: var(--color-text-faint);
   cursor: default;
 }
 
@@ -427,8 +424,10 @@
 /* A waiting job's pill (JobWaiting): a Tab stop above the row's link, so the pointer and the
    focus reach the shared tooltip that says what the start waits for, also where the pill comes
    before the link (the Runs tab), whose layer would otherwise cover it. A plain click on it still
-   opens the job (the row forwards it). */
-.jobs-waits {
+   opens the job (the row forwards it). The word "paused" in All jobs, whose tooltip says since
+   when and by whom, is such a Tab stop too. */
+.jobs-waits,
+.jobs-paused {
   position: relative;
   z-index: 1;
   display: inline-flex;

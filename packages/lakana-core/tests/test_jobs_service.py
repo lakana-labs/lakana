@@ -1791,3 +1791,36 @@ def test_cancelling_the_queued_run_a_job_waits_for_leaves_it_about_to_start(
     assert (daily.waiting_since, daily.waiting_trigger, daily.waits_for_run_id) == (None,) * 3
     assert daily.state == "no run principal"
     assert (daily.last_run_id, daily.last_run_status) == (started.id, "queued")
+
+
+def test_a_paused_job_names_who_paused_it_and_since_when(
+    session: Session, deployed: Repository, principal: PrincipalRef
+) -> None:
+    """The pause's principal by name and its time, in the answer and the list; gone on resume."""
+    service = _service(session)
+    paused = service.pause(principal, "dev", "analytics", "daily")
+    row = _row(session, "daily")
+    assert (paused.paused_by, paused.paused_at) == (principal.name, row.paused_at)
+    listed = {v.name: v for v in service.list(principal, "dev")}
+    assert (listed["daily"].paused_by, listed["daily"].paused_at) == (principal.name, row.paused_at)
+    assert (listed["manual"].paused_by, listed["manual"].paused_at) == (None, None)
+    resumed = service.resume(principal, "dev", "analytics", "daily")
+    assert (resumed.paused_by, resumed.paused_at) == (None, None)
+
+
+def test_a_pause_whose_principal_was_deleted_keeps_its_time_without_a_name(
+    session: Session, deployed: Repository, principal: PrincipalRef
+) -> None:
+    """Deleting the principal sets the row's `paused_by` to NULL; the pause and its time stay."""
+    service = _service(session)
+    pauser = _person(session, "pauser", admin=True)
+    service.pause(pauser, "dev", "analytics", "daily")
+    assert _row(session, "daily").paused_by == pauser.id
+    session.execute(delete(Principal).where(Principal.id == pauser.id))
+    session.commit()
+    session.expire_all()
+    assert session.get(Principal, pauser.id) is None
+    assert _row(session, "daily").paused_by is None
+    daily = {v.name: v for v in service.list(principal, "dev")}["daily"]
+    assert daily.paused and daily.paused_by is None
+    assert daily.paused_at == _row(session, "daily").paused_at

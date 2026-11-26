@@ -252,6 +252,8 @@ function job(paused: boolean): JobOut {
     timezone: "Europe/Berlin",
     state: paused ? "paused" : "scheduled",
     paused,
+    paused_by: paused ? "admin" : null,
+    paused_at: paused ? "2026-11-16T14:20:00Z" : null,
     next_run_at: paused ? null : "2026-11-18T01:00:00Z",
     waiting_for: null,
     waits_for_run_id: null,
@@ -698,6 +700,20 @@ function newRollback(reads: number): DeployOut {
     created_at: "2026-11-17T11:00:00Z",
     finished_at: reads === 0 ? null : "2026-11-17T11:00:30Z",
   });
+}
+
+/**
+ * Keeps the rollback a test asks for running at every read, so the Roll back to this… buttons
+ * stay held while the note follows it (a picture of that state). Registered after
+ * {@link stubJobs}, it answers before its route.
+ *
+ * @param page - The page.
+ */
+export async function keepRollbackRunning(page: Page): Promise<void> {
+  await page.route(
+    (url) => url.pathname === `${AT}/deploys/${NEW_ROLLBACK_ID}`,
+    (route) => route.fulfill({ json: { ...newRollback(0), jobs: DEPLOY_JOBS[NEW_ROLLBACK_ID] } }),
+  );
 }
 
 /**
