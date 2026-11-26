@@ -185,6 +185,7 @@ describe("CiTrustRulePage", () => {
     expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
     expect(within(dialog).getByText("Nothing has changed yet.")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("checkbox", { name: "Dry run" }));
+    await user.click(within(dialog).getByRole("checkbox", { name: /Start the project's jobs/ }));
     await user.click(within(dialog).getByRole("button", { name: "Remove the claim environment" }));
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
     await user.keyboard("{Escape}");
@@ -199,6 +200,7 @@ describe("CiTrustRulePage", () => {
     expect(patch?.body).toEqual({
       kinds: ["deploy", "dry_run"],
       conditions: { repository_id: "123456", ref: "refs/heads/main", event_name: "push" },
+      start_on_deploy_jobs: true,
     });
   });
 

@@ -34,7 +34,7 @@ import {
   createCiTrustRule,
   updateCiTrustRule,
 } from "../api/ciTrust";
-import { listEnvironments } from "../api/environments";
+import { type EnvironmentChoice, listEnvironments } from "../api/environments";
 import { listRepositories } from "../api/repositories";
 import "../access/accessFile.css";
 import { Choice } from "../access/Choice";
@@ -48,6 +48,7 @@ import { NamePicker } from "../shell/NamePicker";
 import { useResource } from "../shell/useResource";
 import { markedText } from "../shell/VisibleText";
 import { useAttempt } from "../sign-in/Attempt";
+import "../access/access.css";
 import "./ciTrust.css";
 import "./ciTrustStrings";
 import {
@@ -370,15 +371,16 @@ export function RuleDialog({ mode, scopes, onDone, onClose }: RuleDialogProps): 
   };
   const save = async (): Promise<void> => {
     if (mode.kind === "edit") {
-      onDone(await updateCiTrustRule(mode.rule.id, changes ?? {}));
+      onDone(await updateCiTrustRule(mode.rule.id, changesOf(mode.rule, fields)));
       return;
     }
     onDone(
       await createCiTrustRule({
         issuer: fields.issuer === "other" ? fields.issuerUrl.trim() : fields.issuer,
         principal: fields.principal.trim(),
-        environment: (fields.environment ?? "").trim(),
-        repository: (fields.repository ?? "").trim(),
+        // Add rule is held until both are given.
+        environment: (fields.environment as string).trim(),
+        repository: (fields.repository as string).trim(),
         kinds: (["deploy", "dry_run"] as const).filter((kind) => fields.kinds.includes(kind)),
         conditions: conditionsOf(fields.conditions),
         start_on_deploy_jobs: fields.startsJobs,
@@ -466,10 +468,8 @@ export function RuleDialog({ mode, scopes, onDone, onClose }: RuleDialogProps): 
                   <span>
                     <EnvironmentName
                       environment={
-                        environmentList.find((choice) => choice.name === id) ?? {
-                          name: id,
-                          protected: false,
-                        }
+                        // Only listed environments are options.
+                        environmentList.find((choice) => choice.name === id) as EnvironmentChoice
                       }
                     />
                     {managedScopeOf(scopes, id) !== null && (

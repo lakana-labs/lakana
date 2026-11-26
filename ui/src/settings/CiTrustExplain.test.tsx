@@ -173,4 +173,20 @@ describe("CiTrustExplain", () => {
       await screen.findByRole("heading", { level: 1, name: "You cannot use CI trust" }),
     ).toBeInTheDocument();
   });
+
+  it("says when there is no rule at all", async () => {
+    const { user } = renderShell(PATH, {
+      routes: ciTrustRoutes({
+        "POST /api/v1/ci-trust-rules/explain": {
+          status: 200,
+          body: { ...REPORT, verdict: "refused: no rule", matching: [], rules: [] },
+        },
+      }),
+    });
+
+    await fill(user, "{}");
+    await user.click(screen.getByRole("button", { name: "Explain" }));
+
+    expect(await screen.findByText("There is no rule yet.")).toBeInTheDocument();
+  });
 });

@@ -15,7 +15,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import { type CiTrustExplainOut, explainCiTrust, listCiTrustRules } from "../api/ciTrust";
-import { listEnvironments } from "../api/environments";
+import { type EnvironmentChoice, listEnvironments } from "../api/environments";
 import { listRepositories } from "../api/repositories";
 import { Choice } from "../access/Choice";
 import { EnvironmentName } from "../shell/EnvironmentName";
@@ -25,6 +25,7 @@ import { useResource } from "../shell/useResource";
 import { markedText, VisibleText } from "../shell/VisibleText";
 import { useAttempt } from "../sign-in/Attempt";
 import { problemText } from "../sign-in/messages";
+import "../access/access.css";
 import "./ciTrust.css";
 import "./ciTrustStrings";
 import { CI_TRUST_PATH, ciTrustRulePath, issuerWords } from "./ciTrustWords";
@@ -109,7 +110,7 @@ function Report({ report, names }: ReportProps): JSX.Element {
           })}
         </p>
       </section>
-      <section className="flat-panel settings-panel" aria-labelledby={rulesId}>
+      <section className="flat-panel settings-panel ci-trust-links" aria-labelledby={rulesId}>
         <h2 id={rulesId}>{t(`${P}.rules`)}</h2>
         {report.rules.length === 0 ? (
           <p className="empty">{t(`${P}.noRules`)}</p>
@@ -205,8 +206,9 @@ export function CiTrustExplain(): JSX.Element {
               setReport(
                 await explainCiTrust({
                   claims: parsed.claims,
-                  environment: environment ?? "",
-                  repository: repository ?? "",
+                  // Explain is held until both are chosen.
+                  environment: environment as string,
+                  repository: repository as string,
                   ...(issuer.trim() === "" ? {} : { issuer: issuer.trim() }),
                 }),
               );
@@ -231,10 +233,8 @@ export function CiTrustExplain(): JSX.Element {
           render={(id) => (
             <EnvironmentName
               environment={
-                environmentList.find((choice) => choice.name === id) ?? {
-                  name: id,
-                  protected: false,
-                }
+                // Only listed environments are options.
+                environmentList.find((choice) => choice.name === id) as EnvironmentChoice
               }
             />
           )}

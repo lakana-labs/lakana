@@ -87,9 +87,7 @@ describe("RunAsPanel", () => {
       },
     });
 
-    await user.click(
-      await screen.findByRole("button", { name: "Set run-as for analytics" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "Set run-as for analytics" }));
     const dialog = await screen.findByRole("dialog", {
       name: "Set the run-as account of analytics in prod",
     });
@@ -117,9 +115,7 @@ describe("RunAsPanel", () => {
     const answer = held();
     const { user } = prodPage({ [`PUT ${RUN_AS}`]: answer.route });
 
-    await user.click(
-      await screen.findByRole("button", { name: "Set run-as for analytics" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "Set run-as for analytics" }));
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByRole("combobox", { name: "Service account" }), "maria");
     await user.keyboard("{Escape}");
@@ -153,6 +149,12 @@ describe("RunAsPanel", () => {
       },
     });
 
+    await user.click(
+      await screen.findByRole("button", { name: "Change the run-as account of analytics" }),
+    );
+    const change = await screen.findByRole("dialog");
+    expect(within(change).getByText("It already runs as this account.")).toBeInTheDocument();
+    await user.click(within(change).getByRole("button", { name: "Cancel" }));
     await user.click(
       await screen.findByRole("button", { name: "Clear the run-as account of analytics" }),
     );
@@ -191,5 +193,63 @@ describe("RunAsPanel", () => {
     const region = await screen.findByRole("region", { name: "Deployments in prod" });
     expect(within(region).getByText("etl-prod")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /run-as account/ })).toBeNull();
+  });
+
+  it("reads the deployments again after a failure, and Cancel leaves the binding", async () => {
+    let tries = 0;
+    const { user } = prodPage({
+      "GET /api/v1/environments/prod/deployments": () => {
+        tries += 1;
+        return tries === 1
+          ? { status: 500, body: { detail: "The catalog database does not answer." } }
+          : { status: 200, body: [aDeployment({ run_as: "etl-prod" })] };
+      },
+    });
+
+    const panel = (await screen.findByRole("heading", { level: 2, name: "Deployments" }))
+      .parentElement as HTMLElement;
+    expect(await within(panel).findByRole("alert")).toHaveTextContent(
+      "The catalog database does not answer.",
+    );
+    await user.click(within(panel).getByRole("button", { name: "Try again" }));
+    expect(screen.getByRole("heading", { level: 2, name: "Deployments" })).toHaveFocus();
+    await user.click(
+      await screen.findByRole("button", { name: "Clear the run-as account of analytics" }),
+    );
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.click(
+      screen.getByRole("button", { name: "Change the run-as account of analytics" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    const field = within(dialog).getByRole("combobox", { name: "Service account" });
+    await user.clear(field);
+    await user.type(field, "nobody");
+    expect(await screen.findByText(/No principal named/)).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("says what clearing does in an unprotected environment", async () => {
+    const { user } = prodPage(
+      {
+        "GET /api/v1/environments/prod/deployments": {
+          status: 200,
+          body: [aDeployment({ run_as: "etl-prod" })],
+        },
+      },
+      { ...PROD, is_protected: false },
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Clear the run-as account of analytics" }),
+    );
+
+    expect(await screen.findByRole("dialog")).toHaveTextContent(
+      "Runs of analytics that a person starts then write as that person",
+    );
   });
 });

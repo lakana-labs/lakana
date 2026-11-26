@@ -8,6 +8,26 @@
   overflow-wrap: normal;
 }
 
+/* Links that name something with a page or lead on: the accent; underlined in a sentence, since
+   colour alone does not set a link apart there (WCAG 1.4.1), and on hover in a list of facts. */
+.ci-trust-links a:not(.row-name):not(.button) {
+  color: var(--color-accent);
+}
+
+.ci-trust-links a:not(.row-name):not(.button):hover {
+  color: var(--color-accent-hover);
+}
+
+.ci-trust-links .fact-list a,
+.ci-trust-explained a {
+  text-decoration: none;
+}
+
+.ci-trust-links .fact-list a:hover,
+.ci-trust-explained a:hover {
+  text-decoration: underline;
+}
+
 .ci-trust-issuer {
   overflow-wrap: anywhere;
 }

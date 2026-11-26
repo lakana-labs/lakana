@@ -164,10 +164,7 @@ for (const theme of ["light", "dark"] as const) {
         page.getByRole("button", { name: "Disable the rule for analytics to prod" }),
       ).toBeFocused();
 
-      await press(
-        page,
-        page.getByRole("button", { name: "Delete rule for analytics to prod" }),
-      );
+      await press(page, page.getByRole("button", { name: "Delete rule for analytics to prod" }));
       const remove = page.getByRole("dialog", { name: "Delete the rule for analytics to prod?" });
       expect(await violations(page), "Delete").toEqual([]);
       await press(page, remove.getByRole("button", { name: "Delete rule" }));
@@ -251,9 +248,7 @@ for (const theme of ["light", "dark"] as const) {
       });
       expect(await violations(page), "Clear run-as").toEqual([]);
       await press(page, clear.getByRole("button", { name: "Clear" }));
-      await expect(
-        page.getByRole("button", { name: "Set run-as for analytics" }),
-      ).toBeFocused();
+      await expect(page.getByRole("button", { name: "Set run-as for analytics" })).toBeFocused();
       expect(sent).toEqual([
         "POST /api/v1/sign-in/step-up/options",
         "POST /api/v1/sign-in/step-up",

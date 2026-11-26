@@ -70,7 +70,7 @@ function SetRunAsDialog({
     name === ""
       ? t(`${P}.principalNeeded`)
       : name === deployment.run_as
-        ? t("settings.ciTrust.dialog.nothingChanged")
+        ? t(`${P}.nothingChanged`)
         : null;
   return (
     <ActionDialog onClose={close}>

@@ -189,4 +189,99 @@ describe("CiTrustPlace", () => {
     // The address no longer asks for the dialog, so going back does not open it again.
     expect(router.state.location.search).toBe("");
   });
+
+  it("reads the managed scopes again on Try again, and Cancel closes Add rule", async () => {
+    let tries = 0;
+    const { user } = renderShell(PATH, {
+      routes: ciTrustRoutes({
+        "GET /api/v1/access/status": () => {
+          tries += 1;
+          return tries === 1
+            ? { status: 500, body: { detail: "The database is down." } }
+            : { status: 200, body: { scopes: [], overrides: [] } };
+        },
+      }),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Try again" }));
+    await user.click(await screen.findByRole("button", { name: "Add rule" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add a CI trust rule" });
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("asks another issuer's URL and starts each issuer's claims until one is touched", async () => {
+    const { server, user } = renderShell(PATH, {
+      routes: ciTrustRoutes({
+        "GET /api/v1/environments": { status: 500, body: { detail: "down" } },
+        "GET /api/v1/repositories": { status: 200, body: [] },
+        "POST /api/v1/ci-trust-rules": {
+          status: 422,
+          body: { type: "ValidationError", detail: "The issuer is not configured." },
+        },
+      }),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Add rule" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add a CI trust rule" });
+    await user.click(within(dialog).getByRole("radio", { name: "GitLab.com" }));
+    expect(within(dialog).getByRole("textbox", { name: "Claim 1" })).toHaveValue("project_id");
+    expect(within(dialog).getByText(/project's number \(project_id\)/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("radio", { name: "Another issuer" }));
+    expect(within(dialog).getByText("Fill in the issuer's URL.")).toBeInTheDocument();
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "Issuer URL" }),
+      "https://git.corp",
+    );
+    await user.type(await within(dialog).findByRole("textbox", { name: "Environment" }), "dev");
+    await user.type(within(dialog).getByRole("textbox", { name: "Repository" }), "dbt");
+    await user.type(within(dialog).getByRole("combobox", { name: "Acts as" }), "ci-dev");
+    await user.keyboard("{Escape}");
+    await user.click(within(dialog).getByRole("checkbox", { name: "Deploy" }));
+    expect(within(dialog).getByText("Allow deploy, dry run or both.")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("checkbox", { name: "Dry run" }));
+    await user.click(within(dialog).getByRole("checkbox", { name: /Start the project's jobs/ }));
+    await user.type(within(dialog).getByRole("textbox", { name: "Value of claim 1" }), "42");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Remove the claim ref_protected" }),
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Add a claim" }));
+    await user.type(within(dialog).getByRole("textbox", { name: "Claim 3" }), "pipeline_source");
+    await user.type(within(dialog).getByRole("textbox", { name: "Value of claim 3" }), "push");
+    // A touched claim keeps its rows when the issuer changes.
+    await user.click(within(dialog).getByRole("radio", { name: "GitHub Actions" }));
+    await user.click(within(dialog).getByRole("radio", { name: "Another issuer" }));
+    expect(within(dialog).getByRole("textbox", { name: "Claim 1" })).toHaveValue("project_id");
+    await user.click(within(dialog).getByRole("button", { name: "Add rule" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "The issuer is not configured.",
+    );
+    const sent = withoutSessionReads(server).find((request) => request.method === "POST");
+    expect(sent?.body).toEqual({
+      issuer: "https://git.corp",
+      principal: "ci-dev",
+      environment: "dev",
+      repository: "dbt",
+      kinds: ["dry_run"],
+      conditions: { project_id: "42", ref: "main", pipeline_source: "push" },
+      start_on_deploy_jobs: true,
+    });
+  });
+
+  it("refuses a managed environment in Add rule, naming the file", async () => {
+    const { user } = renderShell(PATH, { routes: ciTrustRoutes(accessStatusRoute(["prod"])) });
+
+    await user.click(await screen.findByRole("button", { name: "Add rule" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add a CI trust rule" });
+    await user.click(within(dialog).getByRole("button", { name: /Environment/ }));
+    const prod = await screen.findByRole("option", { name: /prod/ });
+    expect(prod).toHaveTextContent("Git");
+    await user.click(prod);
+
+    expect(
+      within(dialog).getByText(/An access file manages prod: add this rule to the ci_trust/),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Add rule" })).toBeNull();
+  });
 });

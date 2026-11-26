@@ -152,7 +152,7 @@ function RuleConditions({ rule }: RuleConditionsProps): JSX.Element {
   const { t } = useTranslation();
   const id = useId();
   return (
-    <section className="flat-panel settings-panel" aria-labelledby={id}>
+    <section className="flat-panel settings-panel ci-trust-links" aria-labelledby={id}>
       <h2 id={id}>{t(`${P}.conditions`)}</h2>
       <p className="page-purpose">{t(`${P}.conditionsHelp`)}</p>
       <div
@@ -211,7 +211,7 @@ function Workflow({ rule }: WorkflowProps): JSX.Element {
   const id = useId();
   const github = issuerPreset(rule.issuer) === "github";
   return (
-    <section className="flat-panel settings-panel" aria-labelledby={id}>
+    <section className="flat-panel settings-panel ci-trust-links" aria-labelledby={id}>
       <h2 id={id}>{t(`${P}.workflow`)}</h2>
       <p>{t(`${P}.workflowText`)}</p>
       <p>
@@ -277,6 +277,7 @@ export function CiTrustRulePage({ id }: CiTrustRulePageProps): JSX.Element {
       ? undefined
       : managedScopeOf(status.data.scopes, rule.environment);
   const writable = managed === null;
+  const scopes = status.data?.scopes ?? [];
   const close = (): void => {
     setOpen(null);
   };
@@ -316,7 +317,10 @@ export function CiTrustRulePage({ id }: CiTrustRulePageProps): JSX.Element {
               <p className="step-status" role="status">
                 {note}
               </p>
-              <section className="flat-panel settings-panel" aria-labelledby={factsId}>
+              <section
+                className="flat-panel settings-panel ci-trust-links"
+                aria-labelledby={factsId}
+              >
                 <div className="panel-head">
                   <h2 className="panel-title" id={factsId}>
                     {t(`${P}.facts`)}
@@ -387,7 +391,7 @@ export function CiTrustRulePage({ id }: CiTrustRulePageProps): JSX.Element {
                 <Suspense fallback={null}>
                   <RuleDialog
                     mode={{ kind: "edit", rule: shown }}
-                    scopes={status.data?.scopes ?? []}
+                    scopes={scopes}
                     onClose={close}
                     onDone={() => {
                       close();

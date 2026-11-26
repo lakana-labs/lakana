@@ -167,7 +167,7 @@ export function CiTrustPlace(): JSX.Element {
       }
     >
       <p className="page-purpose">{t(`${P}.intro`)}</p>
-      <p className="page-purpose">
+      <p className="page-purpose ci-trust-links">
         {t(`${P}.explainIntro`)} <Link to={EXPLAIN_PATH}>{t(`${P}.explainLink`)}</Link>
       </p>
       {status.error !== null && (

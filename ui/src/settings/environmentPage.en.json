@@ -63,6 +63,7 @@
     "principal": "Service account",
     "principalHelp": "An active service account. Every run of this deployment writes with its rights: grant it what the project's assets need, and nothing else.",
     "principalNeeded": "Fill in the service account.",
+    "nothingChanged": "It already runs as this account.",
     "save": "Save",
     "bound": "Runs of {{repository}} in {{name}} now write as {{principal}}.",
     "clearTitle": "Clear the run-as account of {{repository}} in {{name}}?",
