@@ -51,6 +51,7 @@ function asAdmin(
     routes: {
       "GET /api/v1/environments/dev": { status: 200, body: environment },
       "GET /api/v1/environments/dev/usage": { status: 200, body: usage() },
+      "GET /api/v1/environments/dev/deployments": { status: 200, body: [] },
       "GET /api/v1/sign-in/session": freshSession(),
       ...routes,
     },
@@ -83,6 +84,7 @@ function asPerson(
       },
       "GET /api/v1/environments/dev": { status: 200, body: DEV },
       "GET /api/v1/environments/dev/usage": { status: 200, body: usage() },
+      "GET /api/v1/environments/dev/deployments": { status: 200, body: [] },
       ...routes,
     },
   };

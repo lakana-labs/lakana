@@ -229,7 +229,7 @@ Answer fields: `DeploymentOut`
 
 Remove a deployment
 
-Removes the repository's deployment and its binding in the environment; the tables and data stay. Needs `DEPLOY` on the environment; a CI token is always refused. Answers 404 when the environment, repository or deployment does not exist and 409 while a run of the repository is queued or running.
+Removes the repository's deployment and its binding in the environment; the tables and data stay. Needs `DEPLOY` on the environment; a CI token is always refused. Answers 404 when the environment, repository or deployment does not exist, and 409 while a run, or a deploy or rollback, of the repository is queued or running there, and when the deployment is not at `expected_project_version_id` (optional: the project version the caller saw).
 
 Parameters:
 
@@ -237,6 +237,7 @@ Parameters:
 |---|---|---|---|---|
 | `env` | path | yes | text | Environment name. |
 | `repo` | path | yes | text | Repository name. |
+| `expected_project_version_id` | query | no | text (uuid) or null | The project version the caller saw as current; omitted, whatever is current goes. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:

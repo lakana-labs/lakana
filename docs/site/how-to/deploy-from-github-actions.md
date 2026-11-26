@@ -65,6 +65,14 @@ Why each condition is there:
 
 The full list of rules and conditions is in [CI trust rules and CI tokens](../reference/ci-trust-rules.md).
 
+In the web interface, an administrator adds the same rules under **Settings › CI trust** with
+**Add rule**: choose GitHub Actions, the environment, the repository and the account it acts as,
+and complete the claims. The form starts with `repository_id` (left empty for your repository's
+number), `ref=refs/heads/main` and `event_name=push`; **Add a claim** adds `environment`. Saving
+asks for a passkey touch first. The last step of **Connect a repository** links to the same form,
+filled in for the repository it connected. Each rule's page shows its claims, with **Edit**,
+**Disable** (or **Enable**) and **Delete rule**.
+
 ## 3. Add the workflow
 
 `lakana init` writes this file as `.github/workflows/lakana-deploy.yml`, with your repository's
@@ -266,6 +274,11 @@ Verdict: accepted by rule 00ea0aa7-8442-4e35-8b22-f7f524dc83eb
 ```
 
 A rule that does not match lists each claim it disagrees with.
+
+In the web interface, **Explain a CI job's claims** under **Settings › CI trust** does the same:
+paste the claims (the JSON above, never the token itself), choose the environment and the
+repository, and press **Explain**. It shows the verdict and why each rule does or does not match,
+and records nothing.
 
 ## From Python
 

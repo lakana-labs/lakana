@@ -704,6 +704,7 @@
         "next": "Next: deploy it, by hand or from CI.",
         "github": "Deploy from GitHub Actions",
         "gitlab": "Deploy from GitLab CI",
+        "trustRule": "Add a CI trust rule for {{name}} in {{environment}}",
         "deploy": "lakana deploy {{- name}} --env {{- environment}}"
       }
     }

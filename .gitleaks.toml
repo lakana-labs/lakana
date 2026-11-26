@@ -83,3 +83,14 @@ regexes = [
   '''    _crm\(pki, password="wrong-0123456789"\)''',
   '''    _shop\(pki, password="wrong-0123456789"\)''',
 ]
+
+[[allowlists]]
+# A made-up JSON Web Token that commit 6432759 of #836 had in CiTrustExplain.test.tsx (now built
+# from parts at run time); the pull request's commit scan still reads that commit.
+description = "A fake ID token of #836, in the commit that had it"
+condition = "AND"
+commits = ["6432759521e128f797564de706a2646b154eb4ff"]
+regexTarget = "line"
+regexes = [
+  '''        id_token: "eyJhbGciOiJSUzI1NiJ9\.eyJpc3MiOiJ4In0\.c2ln",''',
+]
