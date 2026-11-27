@@ -377,8 +377,15 @@ class OidcProvider:
         """
         return self._post(url, form, headers, self.allowed_hosts)
 
-    def metadata(self) -> ProviderMetadata:
+    def metadata(self, *, current: bool = False) -> ProviderMetadata:
         """Read and check the provider's discovery document.
+
+        Parameters
+        ----------
+        current
+            Whether the provider must have answered its latest fetch
+            (`JwksCache.current_discovery`): asked before the browser is sent there. Otherwise
+            the cached document serves, also while refreshes fail.
 
         Returns
         -------
@@ -388,12 +395,16 @@ class OidcProvider:
         Raises
         ------
         ProviderUnavailable
-            If the document or the keys cannot be fetched, the document names another issuer,
+            If the document or the keys cannot be fetched (with `current`, if the latest fetch
+            failed), the document names another issuer,
             an endpoint is not ``https`` on an allowed host, no algorithm is supported, or no
             client authentication by secret is.
         """
         try:
-            document = self._keys.discovery(self._issuer)
+            if current:
+                document = self._keys.current_discovery(self._issuer)
+            else:
+                document = self._keys.discovery(self._issuer)
         except IdTokenRefused:
             document = None
         if document is None:

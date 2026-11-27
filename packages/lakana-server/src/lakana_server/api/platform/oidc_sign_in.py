@@ -166,6 +166,26 @@ open_router = APIRouter(
 )
 
 
+_LATER = "Try again later; if it keeps happening, tell an administrator."
+UNREACHABLE_AT_START: dict[FlowPurpose, str] = {
+    "sign_in": (
+        "{provider} can't be reached right now, so Lakana did not send you there. If you have a "
+        "passkey, sign in with it; otherwise try again later."
+    ),
+    "invite": (
+        "{provider} can't be reached right now, so Lakana did not send you there; your link "
+        f"still works. {_LATER}"
+    ),
+    "recovery": (
+        "{provider} can't be reached right now, so Lakana did not send you there; your link "
+        f"still works. {_LATER}"
+    ),
+    "link": f"{{provider}} can't be reached right now, so your account was not linked. {_LATER}",
+    "step_up": f"{{provider}} can't be reached right now, so this was not confirmed. {_LATER}",
+}
+"""What a start says while the provider is down, per purpose; ``{provider}`` is its name."""
+
+
 def _provider(request: Request) -> OidcProvider:
     """Read the app's provider client.
 
@@ -257,16 +277,20 @@ def _open_flow(
     Raises
     ------
     OidcSignInRefused
-        403 ``provider_unreachable`` when the provider's metadata cannot be read.
+        403 ``provider_unreachable`` when the provider did not answer its latest fetch: the
+        browser is not sent to a provider that is down.
     """
     provider = _provider(request)
     meta = None
     try:
-        meta = provider.metadata()
+        meta = provider.metadata(current=True)
     except ProviderUnavailable:
         record_refused_oidc(request, session, "provider_unreachable")
     if meta is None:
-        raise OidcSignInRefused("provider_unreachable")
+        raise OidcSignInRefused(
+            "provider_unreachable",
+            UNREACHABLE_AT_START[purpose].format(provider=provider.config.shown_name),
+        )
     origin = request.app.state.settings.public_origin()
     opened = OidcFlowStore(session, clock=get_clock(request)).open(
         purpose,
@@ -354,7 +378,9 @@ def start_oidc_sign_in(
     `link_id` and `secret`, the flow accepts that invite or uses that recovery link: the link
     is checked here (410 with `state` as `/links/redeem` answers, a wrong secret like an
     unknown link) and used only at the finish. Answers 409 while OIDC sign-in is off, 403
-    `OidcSignInRefused` (`reason: provider_unreachable`) when the provider cannot be reached,
+    `OidcSignInRefused` (`reason: provider_unreachable`) when the provider did not answer the
+    server's latest request (repeated once it is a minute old), with a sentence that names the
+    provider: the browser is not sent to a provider that is down;
     422 for a link of another kind, and 429 past
     `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` calls per client address or
     `LAKANA_UI__PASSKEY_OPTIONS_PER_NETWORK_PER_MINUTE` per network and minute.
