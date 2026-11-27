@@ -209,14 +209,12 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   patch updates only; `typescript` and `typescript-eslint` stay in separate Dependabot pull
   requests, and a newer TypeScript comes in its own pull request once typescript-eslint
   supports it.
-- **One override, tracked for removal.** `ui/package.json` has
-  `"overrides": {"minimatch@^10": "11.0.5"}`: advisory GHSA-g3hv-75wg-m249 (a denial of service
-  in minimatch below 11.0.1) reaches the lock through `typescript-eslint`, whose
-  `@typescript-eslint/typescript-estree` still asks for `minimatch ^10`. The use is dev-only and
-  lint-time (it matches the repository's own globs, nothing in the build contains it), but
-  `npm audit --audit-level=low` would fail, rightly. Remove the override when typescript-eslint
-  allows minimatch 11 (issue #507); `scripts/tests/test_ui_project.py` pins it so that the removal
-  is deliberate. No other override without an entry here.
+- **No npm overrides.** `ui/package.json` has no `overrides` key: typescript-eslint 8.74 takes
+  minimatch 11 itself, which closes advisory GHSA-g3hv-75wg-m249 (a denial of service in
+  minimatch 10 and in 11 below 11.0.1; issue #507). `scripts/tests/test_ui_project.py` fails if
+  an override comes back or the lock holds a minimatch 10 or a 11 below 11.0.1. Fix an advisory by
+  updating the parent package; an override is the last resort and needs an entry here with the
+  issue that removes it.
 - **TSDoc on every export and every props member.** ESLint's `jsdoc` rules (TypeScript mode,
   TSDoc tags accepted) fail an undocumented exported function, class, interface, type, enum or
   interface member. Inline comments follow "Inline comments" above.

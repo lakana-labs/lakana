@@ -181,7 +181,7 @@ describe("VersionFiles", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it.each([
+  it.each<[string, Error]>([
     ["the connection breaks in the middle", new DownloadCut()],
     ["the body is longer than the manifest", new DownloadTooLong()],
   ])("says the file did not arrive whole when %s", async (_, error) => {
