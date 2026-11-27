@@ -42,6 +42,9 @@ import "./settingsStrings";
 import { storageSummary } from "./storageSummary";
 import { useLeave } from "./useLeave";
 import { useSettingsViewer } from "./viewer";
+import { type ListSortSpec, sortRows } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import { useWholePages } from "./wholePages";
 
 const P = "settings.environmentPages";
@@ -166,6 +169,12 @@ export function ProtectedMark(): JSX.Element {
   );
 }
 
+/** The columns the environments sort by, in the browser: the list is read whole. */
+const ENVIRONMENT_SORT: ListSortSpec<"name" | "protection" | "storage" | "retention" | "usage"> = {
+  fields: { name: "asc", protection: "asc", storage: "asc", retention: "asc", usage: "desc" },
+  natural: null,
+};
+
 /** Properties of {@link EnvironmentList}. */
 interface EnvironmentListProps {
   /** The live environments' read. */
@@ -188,8 +197,9 @@ interface EnvironmentListProps {
  */
 function EnvironmentList({ read, viewer, heading }: EnvironmentListProps): JSX.Element {
   const { t } = useTranslation();
-  const rows = read.data ?? [];
-  const managed = rows.filter((environment) => managesEnvironment(viewer, environment.name));
+  const sorting = useListSort(ENVIRONMENT_SORT);
+  const all = read.data ?? [];
+  const managed = all.filter((environment) => managesEnvironment(viewer, environment.name));
   const pages = useWholePages(read, heading);
   const usages = useUsages(
     read.data === undefined ? null : managed.map((environment) => environment.name),
@@ -202,6 +212,18 @@ function EnvironmentList({ read, viewer, heading }: EnvironmentListProps): JSX.E
     );
   }
   const showsUsage = managed.length > 0;
+  const rows = sortRows(all, sorting.sort, {
+    name: (environment) => environment.name,
+    // Protected first going up, as the column's mark reads.
+    protection: (environment) => (environment.is_protected ? 0 : 1),
+    storage: (environment) => storageSummary(t, environment),
+    // Kept for ever is the longest retention.
+    retention: (environment) => environment.retention_days ?? Number.MAX_SAFE_INTEGER,
+    usage: (environment) => {
+      const usage = usages.get(environment.name);
+      return usage === undefined || usage === "failed" ? null : usage.total_bytes;
+    },
+  });
   return (
     <ViewList
       pages={pages}
@@ -213,14 +235,14 @@ function EnvironmentList({ read, viewer, heading }: EnvironmentListProps): JSX.E
       toolbar={{ count: P }}
       head={
         <tr>
-          <th scope="col">{t("list.name")}</th>
-          <th scope="col">{t(`${P}.protectionHead`)}</th>
-          <th scope="col">{t(`${P}.storageHead`)}</th>
-          <th scope="col">{t(`${P}.retentionHead`)}</th>
+          <SortHeader {...sorting.header("name")}>{t("list.name")}</SortHeader>
+          <SortHeader {...sorting.header("protection")}>{t(`${P}.protectionHead`)}</SortHeader>
+          <SortHeader {...sorting.header("storage")}>{t(`${P}.storageHead`)}</SortHeader>
+          <SortHeader {...sorting.header("retention")}>{t(`${P}.retentionHead`)}</SortHeader>
           {showsUsage && (
-            <th scope="col" className="number">
+            <SortHeader {...sorting.header("usage")} className="number">
               {t(`${P}.usageHead`)}
-            </th>
+            </SortHeader>
           )}
           <th scope="col">
             <span className="visually-hidden">{t("list.open")}</span>
