@@ -8,11 +8,13 @@
  *
  * @packageDocumentation
  */
-import { type JSX, type Ref, useCallback, useEffect, useRef, useState } from "react";
+import { type JSX, type Ref, useCallback, useContext, useEffect, useRef, useState } from "react";
 import {
   ComboBox,
+  ComboBoxStateContext,
   FieldError,
   Input,
+  type InputProps,
   type Key,
   Label,
   ListBox,
@@ -182,6 +184,40 @@ function useNameSearch<T>(search: NameSearch<T> | null): NameSearchState<T> {
   return { found, ask, settle };
 }
 
+/** Properties of {@link PickerInput}. */
+interface PickerInputProps extends InputProps {
+  /** The input, for the focus. */
+  readonly inputRef: Ref<HTMLInputElement> | undefined;
+  /** Asks for the list a click opens; null for a plain field, which a click does not open. */
+  readonly onClickOpen: (() => void) | null;
+}
+
+/**
+ * The picker's input: a click into it opens the list, so the first names show before anything
+ * is typed (#857). A click while the list is open leaves it as it is.
+ *
+ * @param props - The input's properties, its ref and what a click asks for.
+ * @param props.inputRef - The input.
+ * @param props.onClickOpen - Asks for the list a click opens; null for none.
+ * @returns The input.
+ */
+function PickerInput({ inputRef, onClickOpen, ...props }: PickerInputProps): JSX.Element {
+  const state = useContext(ComboBoxStateContext);
+  return (
+    <Input
+      {...props}
+      ref={inputRef}
+      onClick={() => {
+        if (onClickOpen === null || state === null || state.isOpen) return;
+        // Opened as typing opens it ("input"), so the list asks after the typing pause: a
+        // click that typing follows sends no request for the empty field.
+        state.open(null, "input");
+        onClickOpen();
+      }}
+    />
+  );
+}
+
 /**
  * What the list says besides its suggestions, and what a screen reader is told.
  *
@@ -212,8 +248,9 @@ function stateLine<T>(
 }
 
 /**
- * Renders the field and its list of suggestions (a React Aria `ComboBox`). Typing, pasting or
- * Arrow Down asks the server after a short pause; the list shows each name with its hidden
+ * Renders the field and its list of suggestions (a React Aria `ComboBox`). Typing or pasting
+ * or a click into the field asks the server after a short pause, Arrow Down at once; an empty
+ * field asks for the first names; the list shows each name with its hidden
  * characters marked, a quiet word beside it, and says while it waits, when nothing matches,
  * when the first page is all it shows and when the suggestions could not be read. Choosing a
  * suggestion puts its exact name in the field. Whatever is typed may be sent too: the server
@@ -320,8 +357,15 @@ export function NamePicker<T>({
       >
         <Label>{label}</Label>
         {/* The field's own keys run first (React Aria's), then these. */}
-        <Input
-          ref={inputRef}
+        <PickerInput
+          inputRef={inputRef}
+          onClickOpen={
+            search === null
+              ? null
+              : () => {
+                  ask(value, PICKER_DELAY_MS);
+                }
+          }
           autoComplete="off"
           spellCheck={false}
           onKeyDownCapture={() => {

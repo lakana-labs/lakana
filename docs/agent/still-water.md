@@ -105,8 +105,9 @@ copied into both of its schemes in the same change, or `scripts/tests/test_docs_
   its empty, loading, partial, error, offline or stale, and permission-denied states.
 - **A field that names a principal, a group or a table suggests what exists** (`NamePicker`,
   `ui/src/shell/NamePicker.tsx`, a React Aria `ComboBox`): the server filters under the person's
-  own rights, the list marks hidden characters, says while it waits, when nothing matches ("No
-  principal named …") and when it shows only the first matches, and Escape closes it without
+  own rights; a click into the field (after the typing pause) or Arrow Down (at once) opens the
+  list for the text as it is, the first names for an empty field; the list marks hidden
+  characters, says while it waits, when nothing matches ("No principal named …") and when it shows only the first matches, and Escape closes it without
   closing the dialog around it; Enter takes the highlighted suggestion, or with none sends the
   form as any field does. What is typed may still be sent; the server judges it. A person
   who may not list those names gets the plain field, which asks nothing.

@@ -429,6 +429,88 @@ describe("NamePicker", () => {
     expect(held()).toBe("mariana");
   });
 
+  it("opens the list on a click into the empty field, with the first names", async () => {
+    const user = userEvent.setup();
+    const { search, calls } = heldSearch();
+    render(<Harness search={search} />);
+    const field = screen.getByRole("combobox");
+
+    await user.click(field);
+
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    expect(calls[0]?.text).toBe("");
+    act(() => {
+      calls[0]?.answer({ choices: [aChoice("maria"), aChoice("mariana")], more: false });
+    });
+    expect(
+      (await screen.findAllByRole("option")).map((option) => option.getAttribute("aria-label")),
+    ).toEqual(["maria, Person", "mariana, Person"]);
+    expect(field).toHaveAttribute("aria-expanded", "true");
+    expect(field).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(field).toHaveAttribute("aria-expanded", "false");
+    expect(field).toHaveFocus();
+    expect(outsideKeys).not.toContain("Escape");
+  });
+
+  it("opens the list on Arrow Down in a field the keyboard focused, with the first names", async () => {
+    const user = userEvent.setup();
+    const { search, calls } = heldSearch();
+    render(<Harness search={search} />);
+    const field = screen.getByRole("combobox");
+
+    await user.tab();
+    expect(field).toHaveFocus();
+    expect(calls).toHaveLength(0);
+    expect(field).toHaveAttribute("aria-expanded", "false");
+    await user.keyboard("{ArrowDown}");
+
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    expect(calls[0]?.text).toBe("");
+    act(() => {
+      calls[0]?.answer({ choices: [aChoice("maria")], more: false });
+    });
+    expect(await screen.findByRole("option", { name: /^maria/ })).toBeInTheDocument();
+    expect(field).toHaveAttribute("aria-expanded", "true");
+    expect(field).toHaveFocus();
+  });
+
+  it("asks once when a click lands in a field whose list is open", async () => {
+    const user = userEvent.setup();
+    const { search, calls } = heldSearch();
+    render(<Harness search={search} />);
+    const field = screen.getByRole("combobox");
+    await user.click(field);
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    act(() => {
+      calls[0]?.answer({ choices: [aChoice("maria")], more: false });
+    });
+    await screen.findByRole("option");
+
+    await user.click(field);
+
+    expect(calls).toHaveLength(1);
+    expect(field).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("opens nothing on a click into a plain field", async () => {
+    const user = userEvent.setup();
+    render(<Harness search={null} />);
+    const field = screen.getByRole("combobox");
+
+    await user.click(field);
+
+    expect(field).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
   it("opens the list on Arrow Down once the field is emptied from outside after a choice", async () => {
     const user = userEvent.setup();
     const { search, calls } = heldSearch();
