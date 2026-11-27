@@ -9,6 +9,9 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import type { HeldGrantOut } from "../api/grants";
+import { type ListSortSpec, sortRows } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
 import "./access.css";
@@ -26,6 +29,13 @@ export interface HeldGrantsProps {
   readonly linkGroups: boolean;
 }
 
+/** The columns held grants sort by, in the browser: they are read whole. */
+const HELD_SORT: ListSortSpec<"what" | "on" | "through" | "since"> = {
+  fields: { what: "asc", on: "asc", through: "asc", since: "desc" },
+  natural: null,
+  param: "held",
+};
+
 /**
  * Renders one row per grant: what it gives (a role with its summary, or an action with the
  * server's note), what it is on, through which group or directly, and since when. A grant has
@@ -40,6 +50,7 @@ export interface HeldGrantsProps {
 export function HeldGrants({ grants, label, linkGroups }: HeldGrantsProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
+  const sorting = useListSort(HELD_SORT);
   return (
     <div
       className="list-scroll held-grants-scroll"
@@ -52,14 +63,20 @@ export function HeldGrants({ grants, label, linkGroups }: HeldGrantsProps): JSX.
       <table className="list access-list">
         <thead>
           <tr>
-            <th scope="col">{t("access.held.what")}</th>
-            <th scope="col">{t("access.held.on")}</th>
-            <th scope="col">{t("access.held.through")}</th>
-            <th scope="col">{t("access.held.since")}</th>
+            <SortHeader {...sorting.header("what")}>{t("access.held.what")}</SortHeader>
+            <SortHeader {...sorting.header("on")}>{t("access.held.on")}</SortHeader>
+            <SortHeader {...sorting.header("through")}>{t("access.held.through")}</SortHeader>
+            <SortHeader {...sorting.header("since")}>{t("access.held.since")}</SortHeader>
           </tr>
         </thead>
         <tbody>
-          {grants.map((grant) => {
+          {sortRows(grants, sorting.sort, {
+            what: (grant) => whatWords(t, grant),
+            on: (grant) => whereText(t, grant),
+            // Held directly sorts before every group.
+            through: (grant) => (grant.group === null ? "" : grant.group),
+            since: (grant) => grant.granted_at,
+          }).map((grant) => {
             const second = grant.role !== null ? roleSummary(t, grant.role) : grant.note;
             return (
               <tr key={grant.id}>
