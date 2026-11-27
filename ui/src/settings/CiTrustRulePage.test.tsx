@@ -5,6 +5,7 @@ import { accessStatusRoute } from "../test/access";
 import { aDevRule, aRule, ciTrustRoutes, DEV_RULE, PROD_RULE } from "../test/ciTrust";
 import { held } from "../test/pending";
 import { renderShell } from "../test/render";
+import { columnTexts, sortBy, sortState } from "../test/sorting";
 import { withoutSessionReads } from "../test/server";
 
 const PATH = `/settings/ci-trust/${PROD_RULE}`;
@@ -59,6 +60,17 @@ describe("CiTrustRulePage", () => {
       screen.getByRole("link", { name: "Deploy from GitHub Actions without a stored secret" }),
     ).toHaveAttribute("href", expect.stringContaining("how-to/deploy-from-github-actions/"));
     expect(screen.getByText("Enabled")).toHaveClass("pill-neutral");
+  });
+
+  it("sorts the rule's claims by claim and by value", async () => {
+    const { user } = renderShell(PATH, { routes: ciTrustRoutes() });
+    const region = await screen.findByRole("region", { name: "The rule's claims" });
+
+    await sortBy(user, region, "Claim");
+    expect(columnTexts(region)).toEqual(["environment", "event_name", "ref", "repository_id"]);
+    await sortBy(user, region, "Must equal");
+    expect(sortState(region, "Must equal")).toBe("ascending");
+    expect(columnTexts(region, 1)).toEqual(["123456", "prod", "push", "refs/heads/main"]);
   });
 
   it("names a deleted creator, who changed it last, and the GitLab how-to", async () => {

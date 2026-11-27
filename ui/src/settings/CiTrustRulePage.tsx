@@ -40,6 +40,9 @@ import { CI_TRUST_PATH, issuerPreset, issuerWords, kindsWords } from "./ciTrustW
 import { DetailRead } from "./DetailRead";
 import { environmentPath } from "./environmentPaths";
 import { repositoryPath } from "./repositoryPaths";
+import { type ListSortSpec, sortRows } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import "./settingsStrings";
 
 const RuleDialog = lazy(async () => ({ default: (await import("./CiTrustDialogs")).RuleDialog }));
@@ -141,6 +144,12 @@ interface RuleConditionsProps {
   readonly rule: CiTrustRuleOut;
 }
 
+/** The columns a rule's claims sort by, in the browser. */
+const CONDITION_SORT: ListSortSpec<"claim" | "value"> = {
+  fields: { claim: "asc", value: "asc" },
+  natural: null,
+};
+
 /**
  * The claims the ID token must have, each with the exact text, in their own scrolling region.
  *
@@ -151,6 +160,7 @@ interface RuleConditionsProps {
 function RuleConditions({ rule }: RuleConditionsProps): JSX.Element {
   const { t } = useTranslation();
   const id = useId();
+  const sorting = useListSort(CONDITION_SORT);
   return (
     <section className="flat-panel settings-panel ci-trust-links" aria-labelledby={id}>
       <h2 id={id}>{t(`${P}.conditions`)}</h2>
@@ -166,12 +176,15 @@ function RuleConditions({ rule }: RuleConditionsProps): JSX.Element {
         <table className="list">
           <thead>
             <tr>
-              <th scope="col">{t(`${P}.claim`)}</th>
-              <th scope="col">{t(`${P}.value`)}</th>
+              <SortHeader {...sorting.header("claim")}>{t(`${P}.claim`)}</SortHeader>
+              <SortHeader {...sorting.header("value")}>{t(`${P}.value`)}</SortHeader>
             </tr>
           </thead>
           <tbody>
-            {Object.entries(rule.conditions).map(([name, value]) => (
+            {sortRows(Object.entries(rule.conditions), sorting.sort, {
+              claim: ([name]) => name,
+              value: ([, value]) => value,
+            }).map(([name, value]) => (
               <tr key={name}>
                 <td>
                   <code>
