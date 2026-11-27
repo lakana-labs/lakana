@@ -6,6 +6,7 @@ import { accessStatusRoute } from "../test/access";
 import { aDevRule, aRule, ciTrustRoutes, DEV_RULE, PROD_RULE } from "../test/ciTrust";
 import { held } from "../test/pending";
 import { renderShell } from "../test/render";
+import { columnTexts, sortBy, sortState } from "../test/sorting";
 import { withoutSessionReads } from "../test/server";
 
 const PATH = "/settings/ci-trust";
@@ -36,6 +37,23 @@ describe("CiTrustPlace", () => {
       "href",
       "/settings/ci-trust/explain",
     );
+  });
+
+  it("sorts by each column, the enabled rules first", async () => {
+    const { user } = renderShell(PATH, { routes: ciTrustRoutes() });
+    const region = await screen.findByRole("region", { name: "CI trust rules" });
+
+    await sortBy(user, region, "Rule");
+    expect(columnTexts(region)).toEqual(["analytics to dev", "analytics to prod"]);
+    await sortBy(user, region, "Acts as");
+    expect(columnTexts(region, 2)).toEqual(["ci-dev", "ci-prod"]);
+    await sortBy(user, region, "Allows");
+    expect(columnTexts(region, 3)).toEqual(["Deploy", "Dry run"]);
+    await sortBy(user, region, "State");
+    expect(sortState(region, "State")).toBe("ascending");
+    expect(columnTexts(region, 4)).toEqual(["Enabled", "Disabled"]);
+    await sortBy(user, region, "Issuer");
+    expect(columnTexts(region, 1)).toEqual(["GitHub Actions", "GitHub Actions"]);
   });
 
   it("says when there is no rule yet", async () => {

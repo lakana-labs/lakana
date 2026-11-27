@@ -33,6 +33,9 @@ import {
 import type { LeftRuleState } from "./CiTrustRulePage";
 import { SettingsFrame } from "./SettingsFrame";
 import "./settingsStrings";
+import { type ListSortSpec, sortRows } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import { useWholePages } from "./wholePages";
 
 // The dialog loads when it is first opened, so the list stays small.
@@ -50,6 +53,12 @@ interface RuleListProps {
   readonly heading: RefObject<HTMLHeadingElement | null>;
 }
 
+/** The columns the CI trust rules sort by, in the browser: the list is read whole. */
+const RULE_SORT: ListSortSpec<"rule" | "issuer" | "actsAs" | "allows" | "state"> = {
+  fields: { rule: "asc", issuer: "asc", actsAs: "asc", allows: "asc", state: "asc" },
+  natural: null,
+};
+
 /**
  * The rules in their own scrolling region, oldest first as the server lists them: what each
  * lets deploy where, its issuer, the account it acts as, what it allows and its state.
@@ -63,7 +72,16 @@ interface RuleListProps {
 function RuleList({ read, scopes, heading }: RuleListProps): JSX.Element {
   const { t } = useTranslation();
   const pages = useWholePages(read, heading);
-  const rows = read.data ?? [];
+  const sorting = useListSort(RULE_SORT);
+  const rows = sortRows(read.data ?? [], sorting.sort, {
+    rule: (rule) =>
+      t(`${P}.ruleName`, { repository: rule.repository, environment: rule.environment }),
+    issuer: (rule) => issuerWords(t, rule.issuer),
+    actsAs: (rule) => rule.principal,
+    allows: (rule) => kindsWords(t, rule.kinds),
+    // Enabled first going up.
+    state: (rule) => (rule.enabled ? 0 : 1),
+  });
   return (
     <ViewList
       pages={pages}
@@ -75,11 +93,11 @@ function RuleList({ read, scopes, heading }: RuleListProps): JSX.Element {
       toolbar={{ count: P }}
       head={
         <tr>
-          <th scope="col">{t(`${P}.rule`)}</th>
-          <th scope="col">{t(`${P}.issuer`)}</th>
-          <th scope="col">{t(`${P}.actsAs`)}</th>
-          <th scope="col">{t(`${P}.allows`)}</th>
-          <th scope="col">{t(`${P}.state`)}</th>
+          <SortHeader {...sorting.header("rule")}>{t(`${P}.rule`)}</SortHeader>
+          <SortHeader {...sorting.header("issuer")}>{t(`${P}.issuer`)}</SortHeader>
+          <SortHeader {...sorting.header("actsAs")}>{t(`${P}.actsAs`)}</SortHeader>
+          <SortHeader {...sorting.header("allows")}>{t(`${P}.allows`)}</SortHeader>
+          <SortHeader {...sorting.header("state")}>{t(`${P}.state`)}</SortHeader>
           <th scope="col">
             <span className="visually-hidden">{t("list.open")}</span>
           </th>
