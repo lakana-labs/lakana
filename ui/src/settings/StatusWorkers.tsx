@@ -11,6 +11,9 @@ import type { StatusWorkerOut } from "../api";
 import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
 import { StatusGlyph } from "../status/StatusGlyph";
+import { type ListSortSpec, sortRows } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import "./statusStrings";
 
 /**
@@ -71,6 +74,23 @@ function sorted(workers: readonly StatusWorkerOut[]): StatusWorkerOut[] {
   );
 }
 
+/** The columns the workers sort by, in the browser; without one, lost first, then by host. */
+const WORKER_SORT: ListSortSpec<
+  "host" | "state" | "takes" | "doing" | "memory" | "version" | "lastSeen"
+> = {
+  fields: {
+    host: "asc",
+    state: "asc",
+    takes: "asc",
+    doing: "asc",
+    memory: "desc",
+    version: "asc",
+    lastSeen: "desc",
+  },
+  natural: null,
+  param: "workers",
+};
+
 /** Properties of {@link StatusWorkers}. */
 export interface StatusWorkersProps {
   /** Every registered worker. */
@@ -91,6 +111,7 @@ export interface StatusWorkersProps {
 export function StatusWorkers({ workers, version }: StatusWorkersProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
+  const sorting = useListSort(WORKER_SORT);
   if (workers.length === 0) {
     return <p>{t("settings.statusPage.noWorkerRow")}</p>;
   }
@@ -106,19 +127,32 @@ export function StatusWorkers({ workers, version }: StatusWorkersProps): JSX.Ele
       <table className="list list-static">
         <thead>
           <tr>
-            <th scope="col">{t("settings.statusPage.host")}</th>
-            <th scope="col">{t("settings.statusPage.state")}</th>
-            <th scope="col">{t("settings.statusPage.takes")}</th>
-            <th scope="col">{t("settings.statusPage.doing")}</th>
-            <th scope="col" className="number">
+            <SortHeader {...sorting.header("host")}>{t("settings.statusPage.host")}</SortHeader>
+            <SortHeader {...sorting.header("state")}>{t("settings.statusPage.state")}</SortHeader>
+            <SortHeader {...sorting.header("takes")}>{t("settings.statusPage.takes")}</SortHeader>
+            <SortHeader {...sorting.header("doing")}>{t("settings.statusPage.doing")}</SortHeader>
+            <SortHeader {...sorting.header("memory")} className="number">
               {t("settings.statusPage.memory")}
-            </th>
-            <th scope="col">{t("settings.statusPage.version")}</th>
-            <th scope="col">{t("settings.statusPage.lastSeen")}</th>
+            </SortHeader>
+            <SortHeader {...sorting.header("version")}>
+              {t("settings.statusPage.version")}
+            </SortHeader>
+            <SortHeader {...sorting.header("lastSeen")}>
+              {t("settings.statusPage.lastSeen")}
+            </SortHeader>
           </tr>
         </thead>
         <tbody>
-          {sorted(workers).map((worker) => {
+          {sortRows(sorted(workers), sorting.sort, {
+            host: (worker) => worker.host,
+            // Lost first going up, as the list starts.
+            state: (worker) => (worker.status === "lost" ? 0 : 1),
+            takes: (worker) => t(TAKES[worker.takes]),
+            doing: (worker) => doing(t, worker),
+            memory: (worker) => worker.memory?.used_bytes ?? null,
+            version: (worker) => worker.version,
+            lastSeen: (worker) => worker.heartbeat_at,
+          }).map((worker) => {
             const lost = worker.status === "lost";
             return (
               <tr key={worker.id}>

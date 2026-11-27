@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { areasFor } from "../shell/areas";
 import { DETAIL, HEALTHY } from "../test/home";
 import { renderShell } from "../test/render";
+import { columnTexts, sortBy, sortState } from "../test/sorting";
 import type { FakeRoute } from "../test/server";
 
 const PATH = "/settings/status";
@@ -171,6 +172,56 @@ describe("StatusPage", () => {
     const facts = scheduler.closest("dl");
     expect(facts).toHaveTextContent("Active runs2");
     expect(facts).toHaveTextContent("Running tasks3");
+  });
+
+  it("sorts the workers by each column", async () => {
+    const { user } = asManager({
+      ...DETAIL,
+      workers: [
+        WORKER,
+        {
+          ...WORKER,
+          id: "w-2",
+          host: "worker-2.internal",
+          takes: "interactive",
+          query_run_id: "q",
+        },
+        {
+          ...WORKER,
+          id: "w-3",
+          host: "worker-0.internal",
+          status: "lost",
+          takes: "pipeline",
+          memory: null,
+        },
+      ],
+    });
+    const region = await screen.findByRole("region", { name: "Workers" });
+    expect(columnTexts(region)).toEqual([
+      "worker-0.internal",
+      "worker-1.internal",
+      "worker-2.internal",
+    ]);
+
+    await sortBy(user, region, "Host");
+    await sortBy(user, region, "Host");
+    expect(sortState(region, "Host")).toBe("descending");
+    expect(columnTexts(region)).toEqual([
+      "worker-2.internal",
+      "worker-1.internal",
+      "worker-0.internal",
+    ]);
+    await sortBy(user, region, "Takes");
+    expect(columnTexts(region, 2)).toEqual(["all work", "pipelines", "queries"]);
+    await sortBy(user, region, "Doing");
+    expect(columnTexts(region, 3)).toEqual(["a query", "idle", "idle"]);
+    await sortBy(user, region, "Memory");
+    expect(columnTexts(region, 4).at(-1)).toBe("—");
+    await sortBy(user, region, "State");
+    expect(columnTexts(region, 1)[0]).toBe("lost");
+    await sortBy(user, region, "Version");
+    await sortBy(user, region, "Last seen");
+    expect(sortState(region, "Last seen")).toBe("descending");
   });
 
   it("says when no worker has registered", async () => {
