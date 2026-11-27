@@ -224,7 +224,7 @@
       "sign_out_everywhere": "You signed out on every device.",
       "ended_by_admin": "An administrator ended your session. Sign in again.",
       "replaced": "A newer sign-in in this browser replaced this session. Sign in again.",
-      "deactivated": "Your account is deactivated, so your session ended. Ask an administrator to reactivate it, then sign in again.",
+      "deactivated": "Your Lakana account is deactivated, so your session ended and you can no longer sign in. If this is a mistake, ask an administrator for a new account.",
       "token_revoked": "The token this session was created with was revoked or expired, so the session ended. Sign in again.",
       "token_window": "This session began with an API token of an account that signs in through the identity provider, and nobody has signed in there as you within the token window, so it ended. Sign in again through the identity provider.",
       "oidc_unlinked": "An administrator unlinked your account from the identity provider, which ended your sessions. Ask an administrator for a recovery link.",

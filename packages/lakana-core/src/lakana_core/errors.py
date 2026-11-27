@@ -106,8 +106,8 @@ _SESSION_ENDED = {
     "ended_by_admin": "An administrator ended your session. Sign in again.",
     "replaced": "A newer sign-in in this browser replaced this session. Sign in again.",
     "deactivated": (
-        "Your account is deactivated, so your session ended. Ask an administrator to "
-        "reactivate it, then sign in again."
+        "Your Lakana account is deactivated, so your session ended and you can no longer sign "
+        "in. If this is a mistake, ask an administrator for a new account."
     ),
     "token_window": (  # nosec B105 -- a reason label and its message, not a credential
         "This session was started with an API token of an account that signs in through your "
@@ -266,7 +266,10 @@ _OIDC_REFUSED: dict[str, str] = {
         "Your account at the identity provider is not linked to anyone in Lakana. Ask an "
         "administrator for an invite."
     ),
-    "deactivated": ("Your Lakana account is deactivated. Ask an administrator to reactivate it."),
+    "deactivated": (
+        "Your Lakana account is deactivated, so you can no longer sign in. If this is a "
+        "mistake, ask an administrator for a new account."
+    ),
     "token_invalid": (  # nosec B105 -- a sentence for a person, not a credential
         "Lakana could not verify the identity provider's answer, so nobody was signed in. Try "
         "again; if it keeps happening, tell your administrator."

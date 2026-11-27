@@ -586,7 +586,8 @@ class PasskeyService:
         if principal.type != PrincipalType.USER or not principal.is_active:
             # No name before the signature verified: the answer may be forged.
             raise error(
-                "The account of this passkey is deactivated. Ask an administrator to reactivate it."
+                "The account of this passkey is deactivated, so it can no longer sign in. If "
+                "this is a mistake, ask an administrator for a new account."
             )
         try:
             verified = verify_authentication_response(
