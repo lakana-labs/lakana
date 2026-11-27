@@ -98,20 +98,23 @@ def test_the_ui_package_has_no_version_of_its_own() -> None:
     assert package["private"] is True
 
 
-def test_the_only_override_lifts_minimatch_10_past_its_advisory() -> None:
-    """One override, on purpose: remove it with #507, once typescript-eslint allows minimatch 11.
+def test_no_minimatch_in_the_lock_is_below_its_advisory() -> None:
+    """GHSA-g3hv-75wg-m249 hits every minimatch 10.x and 11.x below 11.0.1 (#507).
 
-    GHSA-g3hv-75wg-m249 affects minimatch below 11.0.1; typescript-eslint 8.72.1 still asks for
-    ``^10.2.2``. The override reaches only that range, never ESLint's own minimatch 3.
+    typescript-eslint takes minimatch 11 itself since 8.74, so the manifest needs no override and
+    must not bring one back. ESLint's own minimatch 3 is outside the advisory.
     """
-    assert _package()["overrides"] == {"minimatch@^10": "11.0.5"}  # remove with #507
+    assert "overrides" not in _package()
     lock = json.loads((UI / "package-lock.json").read_text())
     versions = {
         entry["version"]
         for name, entry in lock["packages"].items()
         if name.endswith("node_modules/minimatch")
     }
-    assert versions == {"3.1.5", "11.0.5"}
+    assert versions
+    for version in versions:
+        major, minor, patch = (int(part) for part in version.split("."))
+        assert major == 3 or (major, minor, patch) >= (11, 0, 1), version
 
 
 def test_vite_inlines_no_asset() -> None:
