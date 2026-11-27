@@ -676,6 +676,37 @@ describe("NamePicker", () => {
     expect(sent).toHaveBeenCalledTimes(1);
   });
 
+  it("sends no form on Enter with the list open while its submit button is held, as other fields", async () => {
+    const user = userEvent.setup();
+    const { search, calls } = heldSearch();
+    const sent = vi.fn();
+    render(
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          sent();
+        }}
+      >
+        <Harness search={search} />
+        <button type="submit" disabled>
+          Create
+        </button>
+      </form>,
+    );
+
+    await user.click(screen.getByRole("combobox"));
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    act(() => {
+      calls[0]?.answer({ choices: [aChoice("maria")], more: false });
+    });
+    await screen.findByRole("option");
+    await user.keyboard("{Enter}");
+
+    expect(sent).not.toHaveBeenCalled();
+  });
+
   it("takes a pasted exact name as it is and suggests it", async () => {
     const user = userEvent.setup();
     const { search, calls } = heldSearch();

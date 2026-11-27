@@ -184,6 +184,26 @@ function useNameSearch<T>(search: NameSearch<T> | null): NameSearchState<T> {
   return { found, ask, settle };
 }
 
+/**
+ * Sends a form as Enter in a text field does (HTML's implicit submission): through its first
+ * submit button, which sends nothing while it is disabled; with none (a `PendingButton` that
+ * waits is no submit button meanwhile), only a form with this one text field is sent.
+ *
+ * @param form - The field's form, or null outside one.
+ */
+function submitAsEnter(form: HTMLFormElement | null): void {
+  if (form === null) return;
+  const button = form.querySelector<HTMLElement>('button[type="submit"], input[type="submit"]');
+  if (button !== null) {
+    button.click();
+    return;
+  }
+  const fields = form.querySelectorAll(
+    'input:not([type]), input[type="text"], input[type="search"]',
+  );
+  if (fields.length === 1) form.requestSubmit();
+}
+
 /** Properties of {@link PickerInput}. */
 interface PickerInputProps extends InputProps {
   /** The input, for the focus. */
@@ -379,7 +399,7 @@ export function NamePicker<T>({
             // An Enter that chose no suggestion does what it does in every other field: React
             // Aria closes the open list and keeps the form from sending, so the form is sent
             // here. One that chose a suggestion handed it over through `onPick` already.
-            if (openAtKey.current) event.currentTarget.form?.requestSubmit();
+            if (openAtKey.current) submitAsEnter(event.currentTarget.form);
             onEnter?.();
           }}
         />
