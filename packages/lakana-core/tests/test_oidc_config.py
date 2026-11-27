@@ -6,7 +6,7 @@ import pydantic
 import pytest
 from pydantic import SecretStr
 
-from lakana_core.oidc.config import OidcSignInConfig, checked_issuer
+from lakana_core.oidc.config import OidcSignInConfig, checked_issuer, without_empty_values
 
 ISSUER = "https://idp.example.com/realms/lakana"
 
@@ -193,3 +193,10 @@ def test_an_issuer_with_an_empty_client_setting_is_still_refused(missing: str) -
         config(**{missing: " "})
     with pytest.raises(pydantic.ValidationError, match="LAKANA_OIDC__CLIENT_SECRET is required"):
         config(client_secret=SecretStr(" "))
+
+
+def test_only_a_mapping_loses_its_empty_values() -> None:
+    """A configuration object (or anything else) goes to pydantic unchanged."""
+    built = config()
+    assert without_empty_values(built) is built
+    assert OidcSignInConfig.model_validate(built) == built

@@ -233,48 +233,45 @@ def test_the_documented_lines_start_the_server(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.parametrize("left_out", ["LAKANA_OIDC__DISPLAY_NAME", "LAKANA_OIDC__ISSUER"])
-def test_a_setting_left_out_of_env_only_stops_the_server(
+def test_a_setting_left_out_of_env_counts_as_not_set(
     monkeypatch: pytest.MonkeyPatch, left_out: str
 ) -> None:
+    """The line still in compose.yaml passes an empty value, which means not set (#853)."""
     env = {k: v for k, v in _env("oidc-keycloak.env").items() if k != left_out}
     passed = _compose_environment(env)
-    # The line still in compose.yaml passes an empty value, which the server refuses ...
     assert passed[left_out] == ""
-    assert not _server_starts(monkeypatch, passed)
-    # ... and with its line removed from compose.yaml too, the server starts.
-    if left_out == "LAKANA_OIDC__ISSUER":
-        passed = {}  # turning single sign-on off removes every LAKANA_OIDC__ line
-    else:
-        passed = {k: v for k, v in passed.items() if k != left_out}
     assert _server_starts(monkeypatch, passed)
+    removed = {k: v for k, v in passed.items() if k != left_out}
+    assert _server_starts(monkeypatch, removed)
 
 
-def test_only_an_empty_allow_hosts_starts_the_server(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_every_empty_setting_starts_the_server(monkeypatch: pytest.MonkeyPatch) -> None:
     from lakana_core.oidc.config import OidcSignInConfig
 
     full = _compose_environment(_env("oidc-keycloak.env"))
-    accepted = set()
+    refused = set()
     for field in OidcSignInConfig.model_fields:
         key = f"{PREFIX}{field.upper()}"
-        if _server_starts(monkeypatch, {**full, key: ""}):
-            accepted.add(key)
-    # The pages name the one exception.
-    assert accepted == {f"{PREFIX}ALLOW_HOSTS"}
+        if not _server_starts(monkeypatch, {**full, key: ""}):
+            refused.add(key)
+    # An issuer without its client stays refused, as the pages say.
+    assert refused == {f"{PREFIX}CLIENT_ID", f"{PREFIX}CLIENT_SECRET"}
 
 
-def test_the_pages_say_to_leave_a_setting_out_of_both_files() -> None:
+def test_the_pages_say_an_empty_setting_counts_as_not_set() -> None:
     rule = (
-        "the server does not start with an empty `LAKANA_OIDC__` setting, except "
-        "`LAKANA_OIDC__ALLOW_HOSTS`, where empty allows no internal host. To leave a setting "
-        "out, remove its line from both files."
+        "the server treats an empty `LAKANA_OIDC__` setting as not set: an empty "
+        "`LAKANA_OIDC__DISPLAY_NAME` puts the issuer's host name on the button, and an empty "
+        "`LAKANA_OIDC__ISSUER` turns single sign-on off. To leave a setting out, removing its "
+        "line from both files stays the tidy way"
     )
     for page in PAGES:
         assert rule in " ".join((HOW_TO / page).read_text().split()), page
     guide = " ".join((HOW_TO / "bring-your-team-onto-single-sign-on.md").read_text().split())
     assert "means removing every `LAKANA_OIDC__` line from the `server` service's" in guide
     assert (
-        "the server does not start with any empty `LAKANA_OIDC__` setting but "
-        "`LAKANA_OIDC__ALLOW_HOSTS`"
+        "passes an empty value, which the server treats as not set, so an empty "
+        "`LAKANA_OIDC__ISSUER` also turns it off"
     ) in guide
 
 
