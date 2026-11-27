@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { areasFor } from "../shell/areas";
 import { renderShell } from "../test/render";
 import { type FakeRoute, whoami } from "../test/server";
+import { columnTexts, sortBy, sortState } from "../test/sorting";
 import { entryPath, SETTINGS_PLACES } from "./places";
 
 const ADMIN = {
@@ -178,6 +179,30 @@ describe("RepositoriesPlace", () => {
       "href",
       "/settings/repositories/dbt-models",
     );
+  });
+
+  it("sorts by each column, the remote's default ref last", async () => {
+    const { user } = renderShell("/settings/repositories", {
+      routes: listed([ANALYTICS, DBT, LOCAL]),
+    });
+    const region = await screen.findByRole("region", { name: "Repositories" });
+
+    await sortBy(user, region, "Name");
+    await sortBy(user, region, "Name");
+    expect(sortState(region, "Name")).toBe("descending");
+    expect(columnTexts(region)).toEqual(["local-dev", "dbt-models", "analytics"]);
+    await sortBy(user, region, "URL");
+    expect(columnTexts(region)).toEqual(["local-dev", "analytics", "dbt-models"]);
+    await sortBy(user, region, "Kind");
+    expect(columnTexts(region, 2)).toEqual(["HTTPS", "Local folder", "SSH"]);
+    await sortBy(user, region, "Credential");
+    expect(columnTexts(region, 3)).toEqual([
+      "Deploy key in 2 environments",
+      "None",
+      "Token in secret gh-token",
+    ]);
+    await sortBy(user, region, "Default ref");
+    expect(columnTexts(region)[0]).toBe("analytics");
   });
 
   it("says a repository has no credential in the warning colour", async () => {
