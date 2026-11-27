@@ -65,7 +65,7 @@ dependencies = [
     # MIT. Loads `lakana.yaml` and SQL front-matter from deployed repositories
     # through an alias-refusing SafeLoader subclass
     # (`lakana_core.projects.yaml_loader`).
-    "pyyaml>=6.0.3",
+    "pyyaml>=6.0.4",
     # Apache-2.0. The one source of time zone rules (`lakana_core.jobs.tz`), so that the deploy
     # check and the scheduler agree on every machine and a slim container needs no system
     # database.
