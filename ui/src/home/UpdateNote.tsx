@@ -49,7 +49,7 @@ export function UpdateNote({ onGone }: UpdateNoteProps): JSX.Element | null {
         </a>
       </p>
       <PendingButton
-        className="home-update-hide"
+        className="close-button home-update-hide"
         aria-label={t("home.update.hide")}
         pending={attempt.busy}
         onPress={() => {

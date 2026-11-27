@@ -49,6 +49,21 @@ describe("ShortcutsDialog", () => {
     });
   });
 
+  it("closes with the × in its corner", async () => {
+    const { user } = renderShell("/");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    await user.click(screen.getByRole("button", { name: "Help" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Keyboard shortcuts" }));
+    const dialog = await screen.findByRole("dialog", { name: "Keyboard shortcuts" });
+
+    await user.click(within(dialog).getByRole("button", { name: "Close dialog" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Help" })).toHaveFocus();
+    });
+  });
+
   it("closes with Escape", async () => {
     const { user } = renderShell("/");
     await screen.findByRole("heading", { level: 1, name: "Home" });

@@ -91,6 +91,13 @@ copied into both of its schemes in the same change, or `scripts/tests/test_docs_
   as `.jobs-waits`), and the row forwards a plain click to its link (`openFromCell`). Never a
   `title` or a tooltip of your own, and never anything a person must read only there: the same
   sentence is in the object's own page.
+- **Every dialog has a × in its top corner** (`DialogClose`, `ui/src/shell/DialogClose.tsx`;
+  `ActionDialog` adds it): named "Close dialog", it calls the same handler as the dialog's
+  Cancel or Close and Escape (and so whatever that handler asks first), comes last in the Tab
+  order and stands beside the title (`.dialog-close`), whose heading leaves it room. A new modal
+  that does not use `ActionDialog` adds `DialogClose` itself (#855). The tour and the command
+  palette are not dialogs of this kind: the tour ends with its own buttons, the palette is a
+  search field.
 - **Breadcrumbs on every detail page:** pass `trail` to `Page`; never a breadcrumb on an area's
   own list or tab. Alt+Left goes back from any page (the shell's, global as in the browser); it
   does nothing while a dialog, a menu or a popover is shown, from a text field inside it too, and

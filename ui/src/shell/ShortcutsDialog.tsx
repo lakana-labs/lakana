@@ -7,6 +7,7 @@ import type { JSX } from "react";
 import { Button, Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
+import { DialogClose } from "./DialogClose";
 import { shortcutLabel } from "./shortcut";
 
 /** The shortcuts, in the order a person meets them; each `shortcuts.<id>` in `en.json`. */
@@ -58,6 +59,7 @@ export function ShortcutsDialog({ onClose }: ShortcutsDialogProps): JSX.Element 
               {t("shortcuts.close")}
             </Button>
           </div>
+          <DialogClose onClose={onClose} />
         </Dialog>
       </Modal>
     </ModalOverlay>

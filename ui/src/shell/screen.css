@@ -339,6 +339,7 @@ tr:hover .chevron {
 /* A dialog taller than the window scrolls inside itself (.float), so its last button is never
    out of reach. */
 .dialog {
+  position: relative;
   width: min(520px, 100%);
   max-height: 100%;
   padding: var(--space-5);
@@ -347,6 +348,36 @@ tr:hover .chevron {
 .dialog h2 {
   margin: 0 0 var(--space-3);
   font-size: var(--type-section-size);
+}
+
+/* A square button with one sign, the ×: Home's update note and a dialog's corner. */
+.close-button {
+  width: var(--control-height);
+  min-height: var(--control-height);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.close-button[data-hovered] {
+  border-color: var(--color-edge);
+  color: var(--color-text);
+}
+
+/* A dialog's ×, in its top corner beside the title, which leaves it room (#855). It comes last
+   in the dialog, so Tab reaches the dialog's own fields first. */
+.dialog-close {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+}
+
+.dialog:has(.dialog-close) h2 {
+  margin-right: calc(var(--control-height) + var(--space-2));
 }
 
 .field {

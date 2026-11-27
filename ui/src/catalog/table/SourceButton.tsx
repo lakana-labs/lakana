@@ -16,6 +16,7 @@ import {
   type TableDefinitionOut,
   type TableRef,
 } from "../../api";
+import { DialogClose } from "../../shell/DialogClose";
 import { useResource } from "../../shell/useResource";
 import { markedText, VisibleText } from "../../shell/VisibleText";
 import "./tableStrings";
@@ -273,6 +274,7 @@ export function SourceButton({
                     {t("table.definedIn.close")}
                   </Button>
                 </div>
+                <DialogClose onClose={close} />
               </>
             )}
           </Dialog>

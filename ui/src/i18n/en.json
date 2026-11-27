@@ -515,6 +515,7 @@
   "dialog": {
     "cancel": "Cancel",
     "checkingProtection": "Checking whether the environment is protected…",
+    "close": "Close dialog",
     "done": "Done"
   },
   "access": {

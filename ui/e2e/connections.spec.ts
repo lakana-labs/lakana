@@ -167,9 +167,9 @@ for (const theme of ["light", "dark"] as const) {
       await openConnection(page, DEV, EXPORTS);
       await page.getByRole("button", { name: "Delete…" }).click();
       const inUse = page.getByRole("dialog", { name: `${EXPORTS} is still in use` });
-      await expect(inUse.getByRole("button", { name: "Close" })).toBeVisible();
+      await expect(inUse.getByRole("button", { name: "Close", exact: true })).toBeVisible();
       expect(await violations(page), "the dialog of a connection in use").toEqual([]);
-      await inUse.getByRole("button", { name: "Close" }).click();
+      await inUse.getByRole("button", { name: "Close", exact: true }).click();
       await expect(inUse).toBeHidden();
 
       await openConnection(page, DEV, SCRATCH);
