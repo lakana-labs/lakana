@@ -193,9 +193,9 @@ Successful sign-ins are `SIGN_IN_OIDC`, links and unlinks `PRINCIPAL_OIDC_LINKED
   server's log says how many administrators can still sign in with a passkey at the new address;
   at none, the operator issues one a recovery link as above.
 - **Turning single sign-on off** means removing every `LAKANA_OIDC__` line from the `server`
-  service's `environment:` in `compose.yaml` as well as from `.env`: a line left in `compose.yaml`
-  passes an empty value, and the server does not start with any empty `LAKANA_OIDC__` setting
-  but `LAKANA_OIDC__ALLOW_HOSTS`. Everyone linked then signs in with their passkeys again (deactivate
+  service's `environment:` in `compose.yaml` as well as from `.env`. A line left in `compose.yaml`
+  passes an empty value, which the server treats as not set, so an empty `LAKANA_OIDC__ISSUER`
+  also turns it off; removing the lines from both files is the tidy way. Everyone linked then signs in with their passkeys again (deactivate
   first anyone who should not), and someone without a passkey needs a recovery link. Their API
   tokens stop at the end of the token window and stay stopped, as there is nothing to link to.
   To let someone use tokens again, unlink them as in

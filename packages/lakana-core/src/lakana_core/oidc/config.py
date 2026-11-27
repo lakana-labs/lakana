@@ -54,6 +54,46 @@ _ALLOW_HOSTS_MESSAGE = (
 )
 
 
+def without_empty_values(data: object) -> object:
+    """Leave out every setting whose value is empty, so that it counts as not set.
+
+    Compose passes a variable that ``.env`` leaves empty as an empty value, so an empty
+    ``LAKANA_OIDC__`` or ``LAKANA_CI_OIDC__`` setting means the same as a missing one (#853).
+
+    Parameters
+    ----------
+    data
+        The raw settings, as the environment or the caller gave them.
+
+    Returns
+    -------
+    object
+        For a mapping, the same mapping without the entries whose value is a text, or a secret
+        text, that is empty or only white space; anything else unchanged, for pydantic to check.
+    """
+    if not isinstance(data, dict):
+        return data
+    return {key: value for key, value in data.items() if not _is_empty(value)}
+
+
+def _is_empty(value: object) -> bool:
+    """Tell whether a raw setting is empty.
+
+    Parameters
+    ----------
+    value
+        The raw value.
+
+    Returns
+    -------
+    bool
+        `True` for a text or a secret text that is empty or only white space.
+    """
+    if isinstance(value, SecretStr):
+        value = value.get_secret_value()
+    return isinstance(value, str) and not value.strip()
+
+
 def as_list(value: object, message: str, *, separators: str = ",") -> object:
     """Accept a list setting as a separated text or a JSON list.
 
@@ -186,7 +226,9 @@ class OidcSignInConfig(ProxyAndCaBundleChecks):
     issuer
         The identity provider's issuer URL, exactly as its ID tokens name it in iss, such as
         `https://idp.example/realms/lakana` for a Keycloak realm. A port is allowed; no trailing
-        slash. Empty (the default) turns OIDC sign-in off. People are linked to this issuer:
+        slash. Not set (the default) turns OIDC sign-in off. An empty value of any
+        `LAKANA_OIDC__` setting counts as not set, as Compose passes one for a `${VAR}` that
+        `.env` leaves empty. People are linked to this issuer:
         after a change, or with it removed, everyone linked to the old one counts as unlinked
         until they link again (their passkeys sign them in meanwhile, and their API tokens stop
         at the end of the token window); setting the old issuer back counts their links again.
@@ -232,6 +274,23 @@ class OidcSignInConfig(ProxyAndCaBundleChecks):
     allow_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
     proxy: SecretStr | None = None
     ca_bundle: Path | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _empty_is_not_set(cls, data: object) -> object:
+        """Treat an empty setting as a missing one.
+
+        Parameters
+        ----------
+        data
+            The raw settings.
+
+        Returns
+        -------
+        object
+            See `without_empty_values`.
+        """
+        return without_empty_values(data)
 
     @property
     def enabled(self) -> bool:
@@ -362,15 +421,14 @@ class OidcSignInConfig(ProxyAndCaBundleChecks):
         Raises
         ------
         ValueError
-            If it is blank, longer than 80 characters or has a control character.
+            If it is longer than 80 characters or has a control character (an empty name
+            never gets here: it counts as not set).
         """
         if value is None:
             return None
         name = value.strip()
-        if (
-            not name
-            or len(name) > _MAX_DISPLAY_NAME
-            or any(ord(char) < 0x20 or ord(char) == 0x7F for char in name)
+        if len(name) > _MAX_DISPLAY_NAME or any(
+            ord(char) < 0x20 or ord(char) == 0x7F for char in name
         ):
             raise ValueError(_DISPLAY_NAME_MESSAGE)
         return name

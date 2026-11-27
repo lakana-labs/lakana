@@ -104,7 +104,7 @@ def test_shown_name_defaults_to_the_issuer_host() -> None:
     assert OidcSignInConfig().shown_name == ""
 
 
-@pytest.mark.parametrize("name", ["", "  ", "x" * 81, "a\nb"])
+@pytest.mark.parametrize("name", ["x" * 81, "a\nb", " a\x7fb "])
 def test_display_name_is_one_short_line(name: str) -> None:
     with pytest.raises(pydantic.ValidationError, match="LAKANA_OIDC__DISPLAY_NAME"):
         config(display_name=name)
@@ -151,3 +151,45 @@ def test_a_json_list_must_hold_texts() -> None:
         config(scopes="[1, 2]")
     with pytest.raises(pydantic.ValidationError, match="LAKANA_OIDC__SCOPES"):
         config(scopes="[openid")
+
+
+FIELDS = (
+    "issuer",
+    "client_id",
+    "client_secret",
+    "scopes",
+    "display_name",
+    "allow_hosts",
+    "proxy",
+    "ca_bundle",
+)
+"""Every `LAKANA_OIDC__*` setting."""
+
+
+@pytest.mark.parametrize("blank", ["", "  ", "\t\n"])
+def test_an_empty_setting_counts_as_not_set(blank: str) -> None:
+    """Compose passes an empty value for a `${VAR}` that `.env` leaves empty (#853)."""
+    off = OidcSignInConfig.model_validate(dict.fromkeys(FIELDS, blank))
+    assert off == OidcSignInConfig()
+    assert not off.enabled
+    on = config(
+        **dict.fromkeys(("scopes", "display_name", "allow_hosts", "proxy", "ca_bundle"), blank)
+    )
+    assert (on.scopes, on.display_name, on.allow_hosts, on.proxy, on.ca_bundle) == (
+        ["openid", "profile", "email"],
+        None,
+        [],
+        None,
+        None,
+    )
+    assert config(proxy=SecretStr(blank)).proxy is None
+
+
+@pytest.mark.parametrize("missing", ["client_id", "client_secret"])
+def test_an_issuer_with_an_empty_client_setting_is_still_refused(missing: str) -> None:
+    with pytest.raises(
+        pydantic.ValidationError, match=f"LAKANA_OIDC__{missing.upper()} is required"
+    ):
+        config(**{missing: " "})
+    with pytest.raises(pydantic.ValidationError, match="LAKANA_OIDC__CLIENT_SECRET is required"):
+        config(client_secret=SecretStr(" "))
