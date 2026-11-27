@@ -5,6 +5,7 @@ import { areasFor } from "../shell/areas";
 import { anEnvironment, aSecret } from "../test/access";
 import { renderShell } from "../test/render";
 import { type FakeRoute, whoami } from "../test/server";
+import { columnTexts, sortBy, sortState } from "../test/sorting";
 import { SECRETS_ENVIRONMENT_KEY } from "./secretUse";
 
 const PATH = "/settings/access/secrets";
@@ -154,6 +155,53 @@ describe("SecretsPage", () => {
     expect(cells(hook)[1]).toBe("Storage and webhooks of dev");
     expect(cells(hook)[3]).toBe("—");
     expect(cells(spare)[1]).toBe("no use yet");
+  });
+
+  it("sorts by each column, a secret without a use or a rotation last", async () => {
+    const { user, router } = renderSecrets(["dev"], PATH, {
+      "GET /api/v1/environments/dev/secrets": {
+        status: 200,
+        body: [
+          aSecret({ id: "s1", name: "corp", created_at: "2026-11-02T10:00:00Z" }),
+          aSecret({
+            id: "s2",
+            name: "Hook",
+            use: "environment",
+            use_target: null,
+            created_at: "2026-11-03T10:00:00Z",
+            rotated_at: "2026-11-15T10:00:00Z",
+          }),
+          aSecret({
+            id: "s3",
+            name: "archive",
+            use: null,
+            use_target: null,
+            created_at: "2026-11-01T10:00:00Z",
+            rotated_at: "2026-11-10T10:00:00Z",
+          }),
+        ],
+      },
+    });
+    const region = await screen.findByRole("region", { name: "Secrets of dev" });
+    expect(columnTexts(region)).toEqual(["corp", "Hook", "archive"]);
+
+    await sortBy(user, region, "Name");
+    expect(columnTexts(region)).toEqual(["archive", "corp", "Hook"]);
+    expect(sortState(region, "Name")).toBe("ascending");
+    expect(router.state.location.search).toBe("?sort=name");
+    await sortBy(user, region, "Name");
+    expect(columnTexts(region)).toEqual(["Hook", "corp", "archive"]);
+
+    await sortBy(user, region, "Use");
+    expect(columnTexts(region, 1)).toEqual([
+      "Package index corp",
+      "Storage and webhooks of dev",
+      "no use yet",
+    ]);
+    await sortBy(user, region, "Created");
+    expect(columnTexts(region)).toEqual(["Hook", "corp", "archive"]);
+    await sortBy(user, region, "Rotated");
+    expect(columnTexts(region)).toEqual(["Hook", "archive", "corp"]);
   });
 
   it("a new environment drops the old rows at once", async () => {

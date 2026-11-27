@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { freshSession, STALE_SESSION, STEP_UP_ROUTES } from "../test/access";
 import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
+import { sortBy, sortState } from "../test/sorting";
 import { fakeWebAuthn } from "../test/webauthn";
 
 const OPEN = {
@@ -38,6 +39,31 @@ async function createInviteFor(
 }
 
 describe("InvitesPage", () => {
+  it("sorts the open invites by name and by expiry, under their own names in the address", async () => {
+    const { user, router } = renderShell("/settings/sign-in/invites", {
+      routes: {
+        "GET /api/v1/invites": {
+          status: 200,
+          body: [
+            { ...OPEN, id: "i-1", name: "kim", expires_at: "2026-11-15T10:00:00Z" },
+            { ...OPEN, id: "i-2", name: "Ana", expires_at: "2026-11-20T10:00:00Z" },
+            { ...OPEN, id: "i-3", name: "sam", expires_at: "2026-11-10T10:00:00Z" },
+          ],
+        },
+      },
+    });
+    const region = await screen.findByRole("region", { name: "Open invites" });
+
+    await sortBy(user, region, "Name");
+    const names = (): (string | null)[] =>
+      [...region.querySelectorAll(".row-name")].map((name) => name.textContent);
+    expect(names()).toEqual(["Ana", "kim", "sam"]);
+    expect(sortState(region, "Name")).toBe("ascending");
+    expect(router.state.location.search).toBe("?invitesSort=name");
+    await sortBy(user, region, "Expires");
+    expect(names()).toEqual(["sam", "kim", "Ana"]);
+  });
+
   it("keeps names whole in their own region", async () => {
     const long = "k".repeat(300);
     renderShell("/settings/sign-in/invites", {

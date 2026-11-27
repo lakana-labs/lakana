@@ -18,6 +18,8 @@ import { useWhen } from "../shell/useWhen";
 import { AttemptStatus, useAttempt } from "./Attempt";
 import { PendingButton } from "../shell/PendingButton";
 import { markedText, VisibleText } from "../shell/VisibleText";
+import { type ListSortSpec, sortRows } from "../shell/listSort";
+import { useListSort } from "../shell/useListSort";
 import "./oidcStrings";
 
 /** Properties of {@link PasskeysPanel}. */
@@ -33,6 +35,13 @@ export interface PasskeysPanelProps {
   readonly readOnly?: boolean;
 }
 
+/** The column the passkeys sort by, in the browser: the list is read whole. */
+const PASSKEY_SORT: ListSortSpec<"name"> = {
+  fields: { name: "asc" },
+  natural: null,
+  param: "passkeys",
+};
+
 /**
  * Renders the panel. Removing a passkey first asks for a confirmation naming what it does, then
  * for a passkey touch when the server needs one; the server refuses to remove one's last working
@@ -47,6 +56,7 @@ export interface PasskeysPanelProps {
 export function PasskeysPanel({ name, own, readOnly = false }: PasskeysPanelProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
+  const sorting = useListSort(PASSKEY_SORT);
   const heading = useId();
   const load = useCallback(() => listPasskeys(name), [name]);
   const passkeys = useResource(load);
@@ -93,9 +103,15 @@ export function PasskeysPanel({ name, own, readOnly = false }: PasskeysPanelProp
             <p className="empty">{own ? t("passkeys.none") : t("passkeys.noneOther")}</p>
           ) : (
             <table className="list">
-              <ListHead columns={[t("list.name")]} hidden={[t("list.actions")]} />
+              <ListHead
+                columns={[t("list.name")]}
+                hidden={[t("list.actions")]}
+                sorts={{ by: ["name"], sorting }}
+              />
               <tbody>
-                {found.map((passkey) => {
+                {sortRows(found, sorting.sort, {
+                  name: (passkey) => (passkey.name === "" ? null : passkey.name),
+                }).map((passkey) => {
                   const label = passkey.name === "" ? t("passkeys.unnamed") : passkey.name;
                   return (
                     <tr key={passkey.id}>

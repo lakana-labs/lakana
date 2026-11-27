@@ -27,7 +27,11 @@ import { useSettingsViewer } from "../settings/viewer";
 import { CopyLine } from "../shell/CopyLine";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
 import { countWords, ListToolbar, type ListState, useListState } from "../shell/ListToolbar";
+import type { ListSortSpec } from "../shell/listSort";
+import { sortRows } from "../shell/listSort";
 import { readRemembered, writeRemembered } from "../shell/remembered";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
 import { markedText, VisibleText } from "../shell/VisibleText";
@@ -40,6 +44,12 @@ import "./secretStrings";
 const AddSecretDialog: ComponentType<SecretDialogProps> = lazy(async () => ({
   default: (await import("./SecretDialogs")).AddSecretDialog,
 }));
+
+/** The columns Secrets sorts by, in the browser: the list is read whole. */
+const SECRET_SORT: ListSortSpec<"name" | "use" | "created" | "rotated"> = {
+  fields: { name: "asc", use: "asc", created: "desc", rotated: "desc" },
+  natural: null,
+};
 
 /**
  * One of the dialogs of a secret, loaded with the others when the first is opened.
@@ -109,6 +119,7 @@ function SecretList({
 }: SecretListProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
+  const sorting = useListSort(SECRET_SORT);
   const load = useCallback(() => listSecrets(environment), [environment]);
   const secrets = useResource(load);
   const { reload } = secrets;
@@ -170,17 +181,22 @@ function SecretList({
       <table className="list list-static">
         <thead>
           <tr>
-            <th scope="col">{t("secrets.name")}</th>
-            <th scope="col">{t("secrets.use")}</th>
-            <th scope="col">{t("secrets.created")}</th>
-            <th scope="col">{t("secrets.rotated")}</th>
+            <SortHeader {...sorting.header("name")}>{t("secrets.name")}</SortHeader>
+            <SortHeader {...sorting.header("use")}>{t("secrets.use")}</SortHeader>
+            <SortHeader {...sorting.header("created")}>{t("secrets.created")}</SortHeader>
+            <SortHeader {...sorting.header("rotated")}>{t("secrets.rotated")}</SortHeader>
             <th scope="col">
               <span className="visually-hidden">{t("list.actions")}</span>
             </th>
           </tr>
         </thead>
         <tbody>
-          {secrets.data.map((secret) => {
+          {sortRows(secrets.data, sorting.sort, {
+            name: (secret) => secret.name,
+            use: (secret) => (secret.use === null ? null : secretUseText(t, secret)),
+            created: (secret) => secret.created_at,
+            rotated: (secret) => secret.rotated_at,
+          }).map((secret) => {
             const name = markedText(secret.name);
             return (
               <tr key={secret.id}>

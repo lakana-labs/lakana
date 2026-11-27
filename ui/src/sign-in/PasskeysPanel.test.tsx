@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
+import { sortBy, sortState } from "../test/sorting";
 import { fakeWebAuthn } from "../test/webauthn";
 
 const LAPTOP = {
@@ -44,6 +45,28 @@ describe("PasskeysPanel", () => {
     expect(within(key).getByText(/Never used/)).toBeInTheDocument();
     expect(within(key).getByText(/Disabled: a copy of it was detected/)).toBeInTheDocument();
     expect(within(key).getByText(/Not usable at this address/)).toBeInTheDocument();
+  });
+
+  it("sorts the passkeys by name, an unnamed one last", async () => {
+    const { user } = renderShell("/account", {
+      routes: {
+        "GET /api/v1/principals/admin/passkeys": {
+          status: 200,
+          body: [KEY, LAPTOP, { ...LAPTOP, id: "p-3", name: "desk" }],
+        },
+        "GET /api/v1/principals/admin/sessions": { status: 200, body: [] },
+      },
+    });
+    const table = (await screen.findByText("Laptop")).closest("table") as HTMLElement;
+
+    await sortBy(user, table, "Name");
+    const names = (): (string | null | undefined)[] =>
+      within(table)
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => row.querySelector("td > span")?.textContent);
+    expect(names()).toEqual(["desk", "Laptop", "Passkey"]);
+    expect(sortState(table, "Name")).toBe("ascending");
   });
 
   it("shows the pending sign on Add a passkey while the server is asked", async () => {

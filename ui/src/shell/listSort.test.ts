@@ -5,6 +5,7 @@ import {
   nextListSort,
   readListSort,
   sortChoice,
+  sortRows,
   writeListSort,
 } from "./listSort";
 
@@ -78,5 +79,64 @@ describe("the sort in the address", () => {
     });
     expect(sortChoice({ field: "created", order: "desc" }, RUNS)).toBeNull();
     expect(sortChoice({ field: null, order: "asc" }, PEOPLE)).toBeNull();
+  });
+});
+
+describe("two lists on one page", () => {
+  const GRANTS: ListSortSpec<"what" | "since"> = {
+    fields: { what: "asc", since: "desc" },
+    natural: null,
+    param: "grants",
+  };
+
+  it("keeps each list's sort under its own names in the address", () => {
+    const params = new URLSearchParams("sort=name&grantsSort=since&grantsOrder=asc");
+    expect(readListSort(params, GRANTS)).toEqual({ field: "since", order: "asc" });
+    expect(readListSort(params, PEOPLE)).toEqual({ field: "name", order: "asc" });
+    expect(writeListSort(params, { field: "what", order: "asc" }, GRANTS).toString()).toBe(
+      "sort=name&grantsSort=what",
+    );
+  });
+});
+
+describe("a list sorted in the browser", () => {
+  interface Row {
+    readonly name: string;
+    readonly size: number | null;
+  }
+  const rows: readonly Row[] = [
+    { name: "gamma", size: 3 },
+    { name: "Beta", size: null },
+    { name: "alpha", size: 3 },
+    { name: "delta", size: 1 },
+  ];
+  const keys = { name: (row: Row) => row.name, size: (row: Row) => row.size };
+
+  it("sorts names in any letter case and numbers by their value, the list's order on ties", () => {
+    expect(sortRows(rows, { field: "name", order: "asc" }, keys).map((row) => row.name)).toEqual([
+      "alpha",
+      "Beta",
+      "delta",
+      "gamma",
+    ]);
+    expect(sortRows(rows, { field: "size", order: "desc" }, keys).map((row) => row.name)).toEqual([
+      "gamma",
+      "alpha",
+      "delta",
+      "Beta",
+    ]);
+  });
+
+  it("puts a row without a value last in either direction", () => {
+    expect(sortRows(rows, { field: "size", order: "asc" }, keys).map((row) => row.name)).toEqual([
+      "delta",
+      "gamma",
+      "alpha",
+      "Beta",
+    ]);
+  });
+
+  it("keeps the list's own order when no column is sorted", () => {
+    expect(sortRows(rows, { field: null, order: "asc" }, keys)).toEqual(rows);
   });
 });
