@@ -23,6 +23,9 @@ import type { DeletedRow } from "./deletedRows";
 import { managesEnvironment, mayCreateEnvironments } from "./places";
 import { storageScheme } from "./storageSummary";
 import { useSettingsViewer } from "./viewer";
+import { type ListSortSpec, sortRows } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import { useWholePages } from "./wholePages";
 
 const P = "settings.environmentPages";
@@ -54,6 +57,13 @@ export interface DeletedEnvironmentsProps {
   readonly onChanged: (action: DeletedAction, environment: EnvironmentOut) => void;
 }
 
+/** The columns the deleted environments sort by, in the browser: the list is read whole. */
+const DELETED_SORT: ListSortSpec<"name" | "deleted" | "purge"> = {
+  fields: { name: "asc", deleted: "desc", purge: "asc" },
+  natural: null,
+  param: "deleted",
+};
+
 /**
  * The deleted environments the person manages, static rows with their dates and actions;
  * nothing when there are none.
@@ -76,8 +86,15 @@ export function DeletedEnvironments({
     readonly action: DeletedAction;
     readonly environment: EnvironmentOut;
   } | null>(null);
-  const rows = (read.data ?? []).filter((environment) =>
-    managesEnvironment(viewer, environment.name),
+  const sorting = useListSort(DELETED_SORT);
+  const rows = sortRows(
+    (read.data ?? []).filter((environment) => managesEnvironment(viewer, environment.name)),
+    sorting.sort,
+    {
+      name: (environment) => environment.name,
+      deleted: (environment) => environment.deleted_at,
+      purge: (environment) => environment.purge_after,
+    },
   );
   const pages = useWholePages(read, heading);
   if (read.data !== undefined && rows.length === 0) return null;
@@ -113,9 +130,9 @@ export function DeletedEnvironments({
         scroll="environments-scroll"
         head={
           <tr>
-            <th scope="col">{t("list.name")}</th>
-            <th scope="col">{t(`${P}.deletedAt`)}</th>
-            <th scope="col">{t(`${P}.purgeAfter`)}</th>
+            <SortHeader {...sorting.header("name")}>{t("list.name")}</SortHeader>
+            <SortHeader {...sorting.header("deleted")}>{t(`${P}.deletedAt`)}</SortHeader>
+            <SortHeader {...sorting.header("purge")}>{t(`${P}.purgeAfter`)}</SortHeader>
             <th scope="col">{t(`${P}.actionsHead`)}</th>
           </tr>
         }
