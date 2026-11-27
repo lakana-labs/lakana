@@ -20,6 +20,9 @@ import { groupSettings, matchesSetting, settingValueText } from "./configuration
 import "./configurationStrings";
 import { DetailRead } from "./DetailRead";
 import { SettingsFrame } from "./SettingsFrame";
+import { type ListSortSpec, sortRows } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import "./settingsStrings";
 
 /** Where the settings reference lives. */
@@ -30,6 +33,12 @@ interface SettingsListProps {
   /** The server's settings, in its order. */
   readonly settings: readonly ConfigurationSettingOut[];
 }
+
+/** The columns the settings sort by within each group, in the browser: they are read whole. */
+const SETTING_SORT: ListSortSpec<"setting" | "value" | "source"> = {
+  fields: { setting: "asc", value: "asc", source: "asc" },
+  natural: null,
+};
 
 /**
  * The find field, its words in the address as `?q=` (replaced, not pushed), and the settings
@@ -49,6 +58,7 @@ function SettingsList({ settings }: SettingsListProps): JSX.Element {
     if (typed === (params.get("q") ?? "")) return;
     setParams(typed === "" ? {} : { q: typed }, { replace: true });
   }, [typed, params, setParams]);
+  const sorting = useListSort(SETTING_SORT);
   const groups = groupSettings(settings.filter((setting) => matchesSetting(setting, typed)));
   return (
     <>
@@ -90,9 +100,15 @@ function SettingsList({ settings }: SettingsListProps): JSX.Element {
           <table className="list list-static">
             <thead>
               <tr>
-                <th scope="col">{t("settings.configuration.setting")}</th>
-                <th scope="col">{t("settings.configuration.value")}</th>
-                <th scope="col">{t("settings.configuration.source")}</th>
+                <SortHeader {...sorting.header("setting")}>
+                  {t("settings.configuration.setting")}
+                </SortHeader>
+                <SortHeader {...sorting.header("value")}>
+                  {t("settings.configuration.value")}
+                </SortHeader>
+                <SortHeader {...sorting.header("source")}>
+                  {t("settings.configuration.source")}
+                </SortHeader>
               </tr>
             </thead>
             {groups.map((group) => (
@@ -108,7 +124,13 @@ function SettingsList({ settings }: SettingsListProps): JSX.Element {
                     )}
                   </th>
                 </tr>
-                {group.settings.map((setting) => {
+                {/* Each group sorts within itself: the groups keep their order. */}
+                {sortRows(group.settings, sorting.sort, {
+                  setting: (setting) => setting.name,
+                  value: (setting) => settingValueText(t, setting).text,
+                  // Set before the defaults going up.
+                  source: (setting) => (setting.source === "set" ? 0 : 1),
+                }).map((setting) => {
                   const value = settingValueText(t, setting);
                   return (
                     <tr key={setting.name}>

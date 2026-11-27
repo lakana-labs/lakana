@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { areasFor } from "../shell/areas";
 import { aSetting, CONFIGURATION_FULL, CONFIGURATION_SAMPLE } from "../test/configuration";
 import { renderShell } from "../test/render";
+import { sortBy, sortState } from "../test/sorting";
 import type { FakeRoute } from "../test/server";
 
 const PATH = "/settings/configuration";
@@ -183,6 +184,29 @@ describe("ConfigurationPage", () => {
     for (const spy of calls) {
       expect(JSON.stringify(spy.mock.calls)).not.toContain("mk-sentinel");
     }
+  });
+
+  it("sorts the settings by each column within their groups", async () => {
+    const { user } = renderShell(PATH, { routes: answering() });
+    const region = await serverSettings();
+    const order = (): (string | null)[] =>
+      [...region.querySelectorAll(".setting-name")].map((name) => name.textContent);
+    const before = (first: string, second: string): boolean =>
+      order().indexOf(first) < order().indexOf(second);
+    const groupHeads = (): (string | null)[] =>
+      [...region.querySelectorAll(".setting-group")].map((head) => head.textContent);
+    const groups = groupHeads();
+
+    await sortBy(user, region, "Setting");
+    expect(before("LAKANA_DATABASE__ECHO", "LAKANA_DATABASE__URL")).toBe(true);
+    await sortBy(user, region, "Setting");
+    expect(sortState(region, "Setting")).toBe("descending");
+    expect(before("LAKANA_DATABASE__URL", "LAKANA_DATABASE__ECHO")).toBe(true);
+    expect(groupHeads()).toEqual(groups);
+    await sortBy(user, region, "Source");
+    expect(before("LAKANA_DATABASE__URL", "LAKANA_DATABASE__ECHO")).toBe(true);
+    await sortBy(user, region, "Value");
+    expect(before("LAKANA_RUN__LEASE_SECONDS", "LAKANA_RUN__VENV_MAX_BYTES")).toBe(false);
   });
 
   it("shows the source in words", async () => {
