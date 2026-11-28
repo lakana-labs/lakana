@@ -194,3 +194,23 @@ def test_a_bad_proxy_or_ca_bundle_is_refused_without_quoting_it() -> None:
     assert "SECRETPW" not in message
     assert "proxy" in message
     assert "absolute" in refusal(ca_bundle="relative/ca.pem")
+
+
+@pytest.mark.parametrize("blank", ["", "  "])
+def test_an_empty_setting_counts_as_not_set(monkeypatch: pytest.MonkeyPatch, blank: str) -> None:
+    """Compose passes an empty value for a `${VAR}` that `.env` leaves empty (#853)."""
+    for name in (
+        "ISSUERS",
+        "AUDIENCE",
+        "ALGORITHMS",
+        "MAX_TOKEN_AGE_SECONDS",
+        "ALLOW_HOSTS",
+        "PROXY",
+        "CA_BUNDLE",
+        "TOKEN_TTL_SECONDS",
+    ):
+        monkeypatch.setenv(f"LAKANA_CI_OIDC__{name}", blank)
+    assert _Settings().ci_oidc == CiOidcConfig()
+    monkeypatch.setenv("LAKANA_CI_OIDC__ISSUERS", "github")
+    with pytest.raises(ValidationError, match="LAKANA_CI_OIDC__AUDIENCE is required"):
+        _Settings()
