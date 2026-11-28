@@ -13,6 +13,7 @@ import {
   table,
   TABLE_PATH,
 } from "../../test/table";
+import { sortBy, sortState } from "../../test/sorting";
 import { firedLines } from "./health";
 
 const PAGE = "/catalog/prod/gold.sales/fact_sales";
@@ -124,6 +125,65 @@ describe("HealthTab", () => {
       within(checks).getByText("lakana check list --env 'prod' --table 'gold.sales.fact_sales'"),
     ).toBeVisible();
     expect(within(checks).getByRole("button", { name: "Copy command" })).toBeVisible();
+  });
+
+  it("sorts the checks, the signals and the readers by their columns", async () => {
+    const { user } = renderShell(TAB, {
+      routes: {
+        [HEALTH_ROUTE]: {
+          status: 200,
+          body: health({
+            checks: [
+              checkResult(),
+              checkResult({ name: "amount_positive", outcome: "failed", failing_rows: 4 }),
+              checkResult({ name: "fresh_daily", outcome: "warned", failing_rows: 1 }),
+            ],
+            readers: READERS,
+            signals: [
+              signalResult(),
+              signalResult({
+                id: "0c7d7f0e-5c10-4b64-a3f0-5a0b9f6b1002",
+                signal: "null_rate",
+                column: "customer_email",
+                last_fired_at: "2026-11-12T06:06:00Z",
+              }),
+            ],
+          }),
+        },
+      },
+    });
+
+    const checks = await section("Checks");
+    await sortBy(user, checks, "Check");
+    expect(rows(checks).map((row) => row[0])).toEqual([
+      "amount_positive",
+      "fresh_daily",
+      "unique_sale_id",
+    ]);
+    await sortBy(user, checks, "Failing rows");
+    expect(sortState(checks, "Failing rows")).toBe("descending");
+    expect(rows(checks).map((row) => row[2])).toEqual(["4", "1", "Not counted"]);
+    await sortBy(user, checks, "Result");
+    expect(rows(checks).map((row) => row[1])).toEqual(["Failed", "Passed", "Warned"]);
+    await sortBy(user, checks, "Finished");
+
+    const signals = await section("Signals");
+    await sortBy(user, signals, "Column");
+    expect(rows(signals).map((row) => row[1])).toEqual(["Whole table", "customer_email"]);
+    await sortBy(user, signals, "Last fired");
+    expect(rows(signals).map((row) => row[1])[0]).toBe("customer_email");
+    await sortBy(user, signals, "Signal");
+    await sortBy(user, signals, "State");
+    await sortBy(user, signals, "Effect");
+    expect(within(signals).queryByRole("button", { name: "Observed" })).toBeNull();
+
+    const readers = await section("Readers");
+    await sortBy(user, readers, "Person");
+    expect(rows(readers).map((row) => row[0])).toEqual(["ana.nowak", "kim.schulz"]);
+    await sortBy(user, readers, "Reads");
+    expect(rows(readers).map((row) => row[0])).toEqual(["kim.schulz", "ana.nowak"]);
+    await sortBy(user, readers, "Last read");
+    expect(sortState(readers, "Last read")).toBe("descending");
   });
 
   it("marks an invisible character in a check's name", async () => {
