@@ -21,6 +21,7 @@ from lakana_core.grants.roles import Role
 from lakana_core.models import JobVersion, Run, RunStatus, RunTrigger, TaskRun
 from lakana_core.pagination import encode_cursor
 from lakana_core.projects.run_policy import RunCaps
+from lakana_core.runs import service as service_module
 from lakana_core.runs.selection import Selection
 from lakana_core.runs.service import RunService
 
@@ -650,3 +651,47 @@ def test_runs_of_every_environment_sort_by_environment_newest_first_within_one(
         if cursor is None:
             break
     assert seen == [runs[n].id for n in (6, 3, 0, 4, 2, 5, 1)]
+
+
+@pytest.mark.parametrize("order", ["desc", "asc"])
+def test_a_run_still_going_is_measured_to_the_first_pages_instant_on_every_page(
+    session: Session,
+    version: JobVersion,
+    principal: PrincipalRef,
+    monkeypatch: pytest.MonkeyPatch,
+    order: str,
+) -> None:
+    """The clock moves between pages; the running run is still listed exactly once, in place."""
+    now = datetime(2026, 11, 28, 12, 0, tzinfo=UTC)
+    long = _make_run(session, principal, minutes=1)
+    going = _make_run(session, principal, minutes=2)
+    short = _make_run(session, principal, minutes=3)
+    going.status = RunStatus.RUNNING
+    long.started_at, long.finished_at = now - timedelta(hours=1), now - timedelta(minutes=50)
+    short.started_at, short.finished_at = now - timedelta(hours=1), now - timedelta(minutes=51)
+    going.started_at, going.finished_at = now - timedelta(seconds=570), None
+    session.commit()
+    clock = [now]
+
+    def ticking(_session: Session) -> datetime:
+        """Give the present, which moves on by 200 seconds every time it is read.
+
+        Parameters
+        ----------
+        _session
+            The session, unused.
+
+        Returns
+        -------
+        datetime
+            The present.
+        """
+        clock[0] += timedelta(seconds=200)
+        return clock[0] - timedelta(seconds=200)
+
+    monkeypatch.setattr(service_module, "db_now", ticking)
+    seen = _walk(_service(session), principal, sort="duration", order=order)
+    expected = [long.id, going.id, short.id]
+    assert seen == (expected if order == "desc" else expected[::-1])
+    # The present is read for the first page only; later pages measure to the cursor's instant.
+    assert clock[0] == now + timedelta(seconds=200)

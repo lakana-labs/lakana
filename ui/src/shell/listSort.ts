@@ -149,17 +149,50 @@ export function sortChoice<F extends string>(
 export type SortValue = string | number | null;
 
 /**
- * Compares two values of one column going up: names in any letter case by code point (as the
- * server sorts names), numbers by their value.
+ * Lowers the letters A to Z only, the letters every database the server runs on lowers alike.
+ *
+ * @param text - The name.
+ * @returns The name with A to Z in lower case and every other character as it was.
+ */
+function foldAscii(text: string): string {
+  return text.replace(/[A-Z]/gu, (letter) => letter.toLowerCase());
+}
+
+/**
+ * Compares two texts by code point, as the server's names compare (`COLLATE "C"`), not by the
+ * UTF-16 units `<` compares: a character beyond the first plane sorts after every one in it.
+ *
+ * @param a - One text.
+ * @param b - The other.
+ * @returns Below zero, zero or above zero.
+ */
+function byCodePoint(a: string, b: string): number {
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    // Inside the text, so a number; `Number` keeps the type without a branch.
+    const left = Number(a.codePointAt(i));
+    const right = Number(b.codePointAt(j));
+    if (left !== right) return left - right;
+    i += left > 0xffff ? 2 : 1;
+    j += right > 0xffff ? 2 : 1;
+  }
+  return a.length - i - (b.length - j);
+}
+
+/**
+ * Compares two values of one column going up: names with A to Z in any letter case and then by
+ * code point (as the server sorts names everywhere), numbers by their value.
  *
  * @param left - One value, not null.
  * @param right - The other, of the same kind.
  * @returns Below zero, zero or above zero.
  */
 function compareValues(left: string | number, right: string | number): number {
-  const a = typeof left === "string" ? left.toLowerCase() : left;
-  const b = typeof right === "string" ? right.toLowerCase() : right;
-  return a < b ? -1 : a > b ? 1 : 0;
+  if (typeof left === "string" && typeof right === "string") {
+    return byCodePoint(foldAscii(left), foldAscii(right));
+  }
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 /**

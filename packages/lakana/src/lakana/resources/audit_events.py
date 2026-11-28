@@ -96,8 +96,8 @@ class AuditEvents:
             ``on`` (the environment, namespace and table); the events of one value come newest
             first.
         order
-            ``desc`` (the default, the newest first) or ``asc``, the oldest first. Every order
-            lists the same events.
+            ``asc`` or ``desc``: for ``occurred`` ``desc`` (the newest first) by default, for
+            the others ``asc``. Every order lists the same events.
 
         Returns
         -------

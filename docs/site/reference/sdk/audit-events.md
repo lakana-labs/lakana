@@ -28,7 +28,7 @@ Filters are not part of the cursor: pass the same ones with every page. `iter` d
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor`, to fetch the page after it. |
 | `kind` | `str | None` | `None` | Only return events of this kind, if given: ``connection`` is every ``CONNECTION_*`` type. With `event_type`, the type must be of the kind. |
 | `sort` | `str | None` | `None` | What the log is sorted by: ``occurred`` (the default), ``event``, ``who`` or ``on`` (the environment, namespace and table); the events of one value come newest first. |
-| `order` | `str | None` | `None` | ``desc`` (the default, the newest first) or ``asc``, the oldest first. Every order lists the same events. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``: for ``occurred`` ``desc`` (the newest first) by default, for the others ``asc``. Every order lists the same events. |
 
 Returns: `AuditEventPage`. Up to `limit` matching events, and the cursor for the next page.
 

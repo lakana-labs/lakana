@@ -361,10 +361,13 @@ class AuditService:
             ``CONNECTION_*`` type. It combines with `event_type`, which must then be of the
             kind. A new kind is added in `EVENT_KINDS`.
         sort
-            What the log is sorted by: ``occurred``, the only field, when nothing is given.
-            Every order shows the same events; only their sequence changes.
+            What the log is sorted by: ``occurred`` (the default), ``event`` (the type),
+            ``who`` (the principal's name; an event of none last) or ``on`` (the environment,
+            namespace and table; an event on the whole instance first), the events of one
+            value newest first. Every order shows the same events; only their sequence changes.
         order
-            ``desc`` (the default, the newest first) or ``asc``, the oldest first.
+            ``asc`` or ``desc``. For ``occurred`` ``desc`` (the newest first) by default, ``asc``
+            the oldest first; for the others ``asc`` by default.
         principal_name
             Only return events attributed to the principal of this name, if given: the same
             filter as its `principal_id`, recorded as one. A name nobody has matches no event.

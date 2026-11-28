@@ -136,6 +136,24 @@ describe("a list sorted in the browser", () => {
     ]);
   });
 
+  it("folds only A to Z and then compares code points, as the server sorts names", () => {
+    const names = ["Ärger", "zebra", "\u{1D538}x", "\uFF21", "ärger", "Zulu", "ZEB"].map(
+      (name) => ({
+        name,
+        size: null,
+      }),
+    );
+    expect(sortRows(names, { field: "name", order: "asc" }, keys).map((row) => row.name)).toEqual([
+      "ZEB",
+      "zebra",
+      "Zulu",
+      "Ärger",
+      "ärger",
+      "\uFF21",
+      "\u{1D538}x",
+    ]);
+  });
+
   it("keeps the list's own order when no column is sorted", () => {
     expect(sortRows(rows, { field: null, order: "asc" }, keys)).toEqual(rows);
   });

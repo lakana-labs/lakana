@@ -510,7 +510,11 @@ def _tagged(value: CursorValue) -> list[str | int | None]:
 
 
 def encode_sorted_cursor(
-    kind: str, sort: str, values: Sequence[CursorValue], row_id: uuid.UUID
+    kind: str,
+    sort: str,
+    values: Sequence[CursorValue],
+    row_id: uuid.UUID,
+    anchor: datetime | None = None,
 ) -> str:
     """Encode the position of a page's last item, for a list sorted by chosen keys.
 
@@ -524,13 +528,25 @@ def encode_sorted_cursor(
         The item's sort keys, in order; a time must be timezone-aware.
     row_id
         The item's id.
+    anchor
+        The instant the first page measured a key that changes with the time against (a run
+        still going, measured up to now), so every later page measures it to the same instant;
+        `None` for keys that do not move.
 
     Returns
     -------
     str
-        Unpadded base64url of ``{"k": kind, "s": sort, "v": [[tag, value], …], "i": id}``.
+        Unpadded base64url of ``{"k": kind, "s": sort, "v": [[tag, value], …], "i": id}``, with
+        ``"a"`` the anchor as ISO text when there is one.
     """
-    body = {"k": kind, "s": sort, "v": [_tagged(v) for v in values], "i": str(row_id)}
+    body: dict[str, object] = {
+        "k": kind,
+        "s": sort,
+        "v": [_tagged(v) for v in values],
+        "i": str(row_id),
+    }
+    if anchor is not None:
+        body["a"] = anchor.isoformat()
     # UTF-8 rather than JSON escapes, as `encode_key_cursor`: a non-ASCII name is at most four
     # bytes a character, not twelve, so the cursor stays within `CURSOR_MAX_LENGTH`.
     text = json.dumps(body, ensure_ascii=False)
@@ -717,10 +733,11 @@ def after_sorted(
     return condition
 
 
-LONGEST_KEY_CHARS = 600 + 255
-"""The most characters the text keys of one cursor hold together: a saved query's folded name
-(`NAME_KEY_MAX`, 600) and its environment's name (255). Every other list's keys are shorter: a
-run's job or repository name and a principal's name are 255, a connection's 63."""
+LONGEST_KEY_CHARS = 1024
+"""The most characters the text keys of one cursor hold together: a task token's purpose, which
+falls back to its task's asset (1,024). The others are shorter: a saved query's folded name
+(`NAME_KEY_MAX`, 600) with its environment's name (255), a run's job or repository name and a
+principal's name (255 each), a connection's (63)."""
 
 CURSOR_MAX_LENGTH = 4 * math.ceil((4 * LONGEST_KEY_CHARS + 512) / 3)
 """The longest cursor a list issues: base64 of the keys' text at four UTF-8 bytes a character, and
@@ -940,6 +957,43 @@ def after_keys(
     return condition
 
 
+def sorted_cursor_anchor(kind: str, cursor: str | None) -> datetime | None:
+    """Read the instant a sorted list's first page measured against, from a later page's cursor.
+
+    Parameters
+    ----------
+    kind
+        The list being read.
+    cursor
+        The `next_cursor` of the previous page, or `None` for the first page.
+
+    Returns
+    -------
+    datetime or None
+        The anchor in UTC; `None` for the first page and for a cursor without one.
+
+    Raises
+    ------
+    ValidationError
+        If `cursor` is not one this server issued for `kind`, or its anchor is not a time with
+        a zone.
+    """
+    if cursor is None:
+        return None
+    raw = _cursor_body(kind, cursor).get("a")
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise ValidationError(_BAD_CURSOR)
+    try:
+        at = datetime.fromisoformat(raw)
+        if at.tzinfo is None:
+            raise ValidationError(_BAD_CURSOR)
+        return at.astimezone(UTC)
+    except (ValueError, OverflowError) as exc:
+        raise ValidationError(_BAD_CURSOR) from exc
+
+
 def read_sorted_position(
     kind: str, sort: ListSort, cursor: str, keys: Sequence[SortKey]
 ) -> SortedPosition:
@@ -1019,6 +1073,7 @@ def sorted_page(
     row_id: ColumnElement[uuid.UUID] | InstrumentedAttribute[uuid.UUID],
     limit: int,
     cursor: str | None,
+    anchor: datetime | None = None,
 ) -> Page[Any]:
     """Read one page of a list sorted by a chosen field, ordered and cut in the database.
 
@@ -1044,6 +1099,10 @@ def sorted_page(
         Most rows returned; at least 1.
     cursor
         The `next_cursor` of the previous page, or `None` for the first.
+    anchor
+        The instant a key that moves with the time was measured against (`sorted_cursor_anchor`
+        of `cursor`, or now on the first page), which the next cursor carries on; `None` when
+        no key moves.
 
     Returns
     -------
@@ -1068,7 +1127,7 @@ def sorted_page(
     next_cursor = None
     if len(rows) > limit:
         last = page[-1]
-        next_cursor = encode_sorted_cursor(kind, sort.name, last[width:-1], last[-1])
+        next_cursor = encode_sorted_cursor(kind, sort.name, last[width:-1], last[-1], anchor)
     return Page([row[0] if width == 1 else tuple(row[:width]) for row in page], next_cursor)
 
 

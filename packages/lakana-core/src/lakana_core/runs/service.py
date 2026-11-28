@@ -82,6 +82,7 @@ from lakana_core.pagination import (
     name_order,
     parse_choices,
     parse_sort,
+    sorted_cursor_anchor,
     sorted_page,
 )
 from lakana_core.policy.schema_change import PolicyWarningView, schema_change_for_reader
@@ -172,7 +173,8 @@ def _run_sort_field(session: Session, field: str, now: datetime) -> SortField:
     field
         A key of `RUN_SORTS`.
     now
-        The present, which a run still going is measured up to.
+        The instant a run still going is measured up to, the same on every page of one
+        listing.
 
     Returns
     -------
@@ -194,7 +196,9 @@ def _run_sort_field(session: Session, field: str, now: datetime) -> SortField:
         "environment": SortKey(name_order(session, Environment.name), str),
         "trigger": SortKey(type_coerce(Run.trigger, String), str, nullable=True),
         "duration": SortKey(
-            elapsed_ms(session, Run.started_at, Run.finished_at, now), int, nullable=True
+            elapsed_ms(session, Run.started_at, Run.finished_at, now),
+            int,
+            nullable=True,
         ),
         "tasks": SortKey(tasks, int),
     }[field]
@@ -2462,6 +2466,10 @@ class RunService:
         if since is not None:
             query = query.where(Run.created_at >= since)
         if sort != ("created", True):
+            # A run still going is measured up to the instant of the first page on every page,
+            # so its duration does not grow past the cursor between two pages.
+            moving = sort.field == "duration"
+            now = (sorted_cursor_anchor(kind, cursor) if moving else None) or db_now(self._session)
             sorted_runs = sorted_page(
                 self._session,
                 query.join(Repository, Repository.id == Run.repository_id).join(
@@ -2469,10 +2477,11 @@ class RunService:
                 ),
                 kind=kind,
                 sort=sort,
-                field=_run_sort_field(self._session, sort.field, db_now(self._session)),
+                field=_run_sort_field(self._session, sort.field, now),
                 row_id=Run.id,
                 limit=limit,
                 cursor=cursor,
+                anchor=now if moving else None,
             )
             return sorted_runs.items, sorted_runs.next_cursor
         position = None if cursor is None else decode_cursor(kind, cursor)

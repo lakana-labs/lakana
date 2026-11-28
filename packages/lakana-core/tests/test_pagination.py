@@ -489,7 +489,7 @@ def test_a_sorted_page_refuses_a_limit_below_one() -> None:
 
 def test_the_longest_cursors_fit_the_routes_limit() -> None:
     """Keys of four-byte characters at every name's longest still fit `CURSOR_MAX_LENGTH`."""
-    from lakana_core.models import Environment, Principal, Repository, Run
+    from lakana_core.models import Environment, Principal, Repository, Run, TaskRun
     from lakana_core.models.saved_query import NAME_KEY_MAX
     from lakana_core.pagination import (
         CURSOR_MAX_LENGTH,
@@ -516,7 +516,17 @@ def test_the_longest_cursors_fit_the_routes_limit() -> None:
         return found
 
     env_max = length(Environment.name)
-    assert NAME_KEY_MAX + env_max == LONGEST_KEY_CHARS
+    assert NAME_KEY_MAX + env_max <= LONGEST_KEY_CHARS
+    # A task token's purpose falls back to its task's asset, the longest key of all.
+    assert length(TaskRun.asset) == LONGEST_KEY_CHARS
+    purpose = encode_sorted_cursor(
+        "task-tokens", "purpose:asc", [long_asset := "\U0001d538" * length(TaskRun.asset), _AT], ID
+    )
+    assert len(purpose) <= CURSOR_MAX_LENGTH
+    assert (
+        decode_sorted_cursor("task-tokens", "purpose:asc", purpose, [str, datetime]).values[0]
+        == long_asset
+    )
     for column in (Principal.name, Repository.name, Run.job):
         assert length(column) <= LONGEST_KEY_CHARS
     wide = "\U0001d538"  # four bytes in UTF-8
@@ -618,3 +628,18 @@ def test_a_duration_is_measured_by_each_database_its_own_way() -> None:
         finally:
             engine.dispose()
         assert word in compiled and "coalesce(runs.finished_at" in compiled
+
+
+def test_a_sorted_cursor_carries_the_instant_its_first_page_measured_against() -> None:
+    """The anchor comes back as it went; a cursor without one has none; a forged one is 422."""
+    from lakana_core.pagination import sorted_cursor_anchor
+
+    assert sorted_cursor_anchor("runs", None) is None
+    plain = encode_sorted_cursor("runs", "duration:desc", [1, _AT], ID)
+    assert sorted_cursor_anchor("runs", plain) is None
+    anchored = encode_sorted_cursor("runs", "duration:desc", [1, _AT], ID, _AT)
+    assert sorted_cursor_anchor("runs", anchored) == _AT
+    for forged in (5, "2026-10-11T12:00:00", "yesterday"):
+        body = {"k": "runs", "s": "duration:desc", "v": [], "i": str(ID), "a": forged}
+        with pytest.raises(ValidationError, match="not valid"):
+            sorted_cursor_anchor("runs", _raw(json.dumps(body).encode()))
