@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { references } from "../../test/manage";
 import { renderShell } from "../../test/render";
+import { columnTexts, sortBy, sortState } from "../../test/sorting";
 import { TABLE_PATH } from "../../test/table";
 
 const TAB = "/catalog/prod/gold.sales/fact_sales/references";
@@ -47,6 +48,39 @@ describe("ReferencesTab", () => {
     expect(link).toHaveAttribute("href", "/catalog/prod/gold/dim_store");
     expect(row).toHaveTextContent("store_id → gold.dim_store.store_id");
     expect(out.querySelector("table")).toHaveClass("list", "list-static");
+  });
+
+  it("sorts each direction by its columns, each under its own names in the address", async () => {
+    const other = {
+      ...incomingRow(),
+      id: "gold.sales.alpha/ref",
+      table: "gold.sales.alpha",
+      column: "zz_id",
+    };
+    const { user, router } = renderShell(TAB, {
+      routes: {
+        [ROUTE]: {
+          status: 200,
+          body: references({
+            outgoing: [OUTGOING, { ...OUTGOING, id: "o2", column: "amount_id" }],
+            incoming: [incomingRow(), other],
+          }),
+        },
+      },
+    });
+
+    const out = await panel("This table references");
+    await sortBy(user, out, "Reference");
+    expect(columnTexts(out)[0]).toMatch(/^amount_id/);
+    expect(router.state.location.search).toBe("?outSort=reference");
+    expect(within(out).queryByRole("button", { name: "Note" })).toBeNull();
+
+    const into = await panel("Referenced by");
+    await sortBy(user, into, "Table");
+    expect(columnTexts(into)).toEqual(["gold.sales.alpha", "gold.sales.fact_returns"]);
+    await sortBy(user, into, "Reference");
+    expect(sortState(into, "Reference")).toBe("ascending");
+    expect(columnTexts(into)).toEqual(["gold.sales.fact_returns", "gold.sales.alpha"]);
   });
 
   it("lists the tables that reference it, each linked", async () => {
