@@ -406,11 +406,16 @@ class JwksCache:
         """
         state.attempted_at = now
         reason = ""
+        failed = True
         try:
             state.snapshot = self._load(state.url, now)
-        except (FetchFailed, KeySetInvalid) as failed:
-            reason = failed.reason
-        state.last_failed = bool(reason)
+            failed = False
+        except (FetchFailed, KeySetInvalid) as refused:
+            reason = refused.reason
+        finally:
+            # Set once the fetch has ended, never before: until then a start answers from the
+            # previous fetch. Any exception, also an unexpected one, counts as a failure.
+            state.last_failed = failed
         if reason:
             self._log.warning(
                 "could not fetch the %s keys of %s: %s", self._source.label, state.url, reason

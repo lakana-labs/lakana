@@ -5,8 +5,10 @@ CI's binding is covered, unchanged, by `test_ci_oidc_jwks.py`.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Collection
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 from ci_oidc_test_helpers import (
@@ -194,14 +196,14 @@ class _Taken:
         Parameters
         ----------
         blocking
-            Unused: a start never blocks.
+            Must be false: a start never waits.
 
         Returns
         -------
         bool
             `False`.
         """
-        del blocking
+        assert blocking is False, "a start must never wait for a running fetch"
         return False
 
     def release(self) -> None:
@@ -231,14 +233,14 @@ class _FetchedMeanwhile:
         Parameters
         ----------
         blocking
-            Unused.
+            Must be false: a start never waits.
 
         Returns
         -------
         bool
             `True`.
         """
-        del blocking
+        assert blocking is False, "a start must never wait for a running fetch"
         state = self._cache._issuers[ISSUER]
         state.attempted_at = self._clock.now
         return True
@@ -255,6 +257,60 @@ def test_a_fetch_that_ran_meanwhile_is_not_repeated() -> None:
     calls = len(fetcher.calls)
     cache._issuers[ISSUER].refreshing = _FetchedMeanwhile(cache, clock)  # ty: ignore[invalid-assignment]
     assert cache.current_discovery(ISSUER)["issuer"] == ISSUER
+    assert len(fetcher.calls) == calls
+
+
+def test_a_start_returns_while_another_request_holds_the_lock() -> None:
+    """With the real lock held elsewhere, a start returns at once instead of waiting."""
+    fetcher, clock = published(), Clock()
+    cache = JwksCache(source(), fetcher=fetcher, clock=clock)
+    first = cache.current_discovery(ISSUER)
+    clock.now += REFRESH_INTERVAL_SECONDS
+    lock = cache._issuers[ISSUER].refreshing
+    answers: list[object] = []
+    assert lock.acquire()
+    try:
+        worker = threading.Thread(target=lambda: answers.append(cache.current_discovery(ISSUER)))
+        worker.start()
+        worker.join(timeout=5)
+        assert not worker.is_alive(), "the start waited for the lock"
+    finally:
+        lock.release()
+    assert answers == [first]
+
+
+def test_an_unexpected_error_while_fetching_fails_closed() -> None:
+    """Any failure of a fetch counts as failed, not only the expected ones."""
+    fetcher, clock = published(), Clock()
+    cache = JwksCache(source(), fetcher=fetcher, clock=clock)
+    cache.current_discovery(ISSUER)
+    clock.now += REFRESH_INTERVAL_SECONDS
+    calls = len(fetcher.calls)
+
+    def broken(url: str, allowed_hosts: Collection[str]) -> NoReturn:
+        """Fail in a way the cache does not expect.
+
+        Parameters
+        ----------
+        url
+            The URL.
+        allowed_hosts
+            Unused.
+
+        Raises
+        ------
+        RuntimeError
+            Always.
+        """
+        del url, allowed_hosts
+        raise RuntimeError("a bug in the fetcher")
+
+    cache._fetch = broken
+    with pytest.raises(RuntimeError):
+        cache.current_discovery(ISSUER)
+    with pytest.raises(IdTokenRefused) as info:
+        cache.current_discovery(ISSUER)
+    assert info.value.code is RefusalCode.KEYS_UNAVAILABLE
     assert len(fetcher.calls) == calls
 
 

@@ -260,7 +260,10 @@ an administrator." An invite or a recovery link says that the link still works, 
 profile that the account was not linked, and a confirmation that it was not confirmed. The table's
 sentence is what a person reads after coming back from Keycloak. If the server reaches Keycloak but
 the person's browser does not (another network, a firewall, a host name only the server resolves),
-the browser's own error page, such as `ERR_ADDRESS_UNREACHABLE`, is still what they see.
+the browser's own error page, such as `ERR_ADDRESS_UNREACHABLE`, is still what they see. The check
+is at most a minute old, so for about a minute after Keycloak goes down, plus the time of one
+request to it (up to about 25 seconds when its address drops packets), a browser may still be sent
+there.
 
 Two problems never reach Lakana: Keycloak shows its own error page for a redirect URI that does
 not match the client's **Valid redirect URIs** exactly, and for a person disabled in Keycloak.
