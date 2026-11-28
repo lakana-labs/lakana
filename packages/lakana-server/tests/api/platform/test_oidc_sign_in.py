@@ -349,6 +349,11 @@ def _unreachable(r: httpx.Response) -> str:
     assert (r.json()["type"], r.json()["reason"]) == ("OidcSignInRefused", "provider_unreachable")
     detail = str(r.json()["detail"])
     assert detail.startswith("idp.example.com can't be reached right now")
+    # The why is for the operator's log: no fetch error and no issuer URL reach the person.
+    assert "unreachable" not in detail
+    assert ISSUER not in detail
+    assert "realms" not in detail
+    assert detail.endswith("if it keeps happening, tell an administrator.")
     return detail
 
 

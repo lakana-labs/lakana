@@ -170,7 +170,8 @@ _LATER = "Try again later; if it keeps happening, tell an administrator."
 UNREACHABLE_AT_START: dict[FlowPurpose, str] = {
     "sign_in": (
         "{provider} can't be reached right now, so Lakana did not send you there. If you have a "
-        "passkey, sign in with it; otherwise try again later."
+        "passkey, sign in with it; otherwise try again later, and if it keeps happening, tell an "
+        "administrator."
     ),
     "invite": (
         "{provider} can't be reached right now, so Lakana did not send you there; your link "
