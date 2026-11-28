@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { renderShell } from "../../test/render";
 import { permissions, table, TABLE, TABLE_PATH } from "../../test/table";
+import { columnTexts, sortBy, sortState } from "../../test/sorting";
 import { columnJoins, columnRole } from "./ColumnsTab";
 
 const PAGE = "/catalog/prod/gold.sales/fact_sales/columns";
@@ -90,6 +91,29 @@ describe("ColumnsTab", () => {
     expect(cells(all[1] as HTMLElement).slice(0, 4)).toEqual(["store_id", "long", "Allowed", ""]);
     expect(cells(all[1] as HTMLElement)[4]).toContain("gold.dim_store.store_id");
     expect(cells(all[3] as HTMLElement)[3]).toBe("Measure");
+  });
+
+  it("sorts the columns by each fact but the description", async () => {
+    const { user } = renderShell(PAGE, { routes: { [PERMISSIONS]: READ_ONLY } });
+    await rows();
+    const region = screen.getByRole("region", { name: "Table columns" });
+    const names = (): (string | null)[] => columnTexts(region);
+    const own = names();
+
+    await sortBy(user, region, "Name");
+    expect(names()).toEqual([...own].sort());
+    await sortBy(user, region, "Nulls");
+    expect(sortState(region, "Nulls")).toBe("ascending");
+    expect(columnTexts(region, 2).indexOf("Allowed")).toBeGreaterThan(
+      columnTexts(region, 2).lastIndexOf("Never"),
+    );
+    await sortBy(user, region, "Role");
+    expect(columnTexts(region, 3).slice(0, 2)).toEqual(["Key", "Measure"]);
+    await sortBy(user, region, "Joins");
+    expect(columnTexts(region, 4)[0]).toContain("gold.dim_store.store_id");
+    await sortBy(user, region, "Type");
+    await sortBy(user, region, "Terms");
+    expect(within(region).queryByRole("button", { name: "Description" })).toBeNull();
   });
 
   it("links a join to the table it points at when that exists", async () => {
