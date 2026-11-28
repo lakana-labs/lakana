@@ -1175,7 +1175,11 @@ for (const theme of ["light", "dark"] as const) {
 
     test("Run now, Pause and Resume schedule, Cancel, Resume, Log, Show source and Show rows work by keyboard alone", async ({
       page,
+      browserName,
     }) => {
+      // Eight controls reached by Tab alone, each press read back: WebKit needs more than the
+      // default 30 seconds for it on two cores.
+      test.slow(browserName === "webkit");
       // Run now: the new run is selected, the note says so, the focus stays on the button.
       await openJob(page);
       const runNow = page.getByRole("button", { name: "Run now" });
@@ -1229,7 +1233,10 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.locator(".jobs-facts-list")).toContainText("Cancelled", {
         timeout: 10_000,
       });
+      // Read at once, not retried: the heading takes the focus in the change that shows the end,
+      // so it is never on <body>, not even for a moment (WebKit showed one).
       expect(await focusOnPage(page), "the focus is never on <body>").toBe(true);
+      await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
 
       // Resume opens the new run, its heading holding the focus.
       await openRun(page, FAILED_ID);
@@ -1261,6 +1268,7 @@ for (const theme of ["light", "dark"] as const) {
       await tabOnto(page.getByRole("button", { name: `Show rows of ${FAILED_CHECK}` }));
       await page.keyboard.press("Enter");
       await expect(page).toHaveURL(new RegExp(`/queries/${ENV}/runs/${ROWS_QUERY_ID}$`));
+      await expect.poll(() => focusOnPage(page), "the focus is not left on <body>").toBe(true);
     });
 
     test("no horizontal scroll at 320 px, the tasks and the attempts scrolling in their own region", async ({

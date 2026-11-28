@@ -1416,7 +1416,13 @@ five).
   makes ARIA element reflection (`ariaLabelledByElements` and the other `aria*Elements`) answer
   null, so axe reads the attributes: Playwright's Firefox 159 crashes the page ("Page crashed") when
   axe 4.14 reads `ariaLabelledByElements` of an element React rendered (#700). Remove it once a
-  Firefox update reads the property without crashing. `e2e:server` runs the sign-in,
+  Firefox update reads the property without crashing. The same Firefox bug (Mozilla bug 2090055:
+  a read of the property in two script worlds, Playwright's own and the page's, ends the content
+  process on signal 11; stock Firefox 161 too) is hit by Playwright 1.65 itself when a locator
+  built from a named `getByRole` or `getByLabel` runs in the page, through `evaluate`,
+  `evaluateAll` or `allTextContents`, after an assertion read it (Playwright #43967, fixed by its
+  Firefox build 1575). Such a read goes through a CSS locator instead, with a comment saying why;
+  the page itself never reads the property. `e2e:server` runs the sign-in,
   Home, Catalog, table page, Queries and profile picture tests against a real `lakana-server` instead (Chromium per pull
   request, Firefox and WebKit nightly); its tests share one server and one database and run one
   at a time, every person and environment they create has a unique name, and each test sets the state it needs

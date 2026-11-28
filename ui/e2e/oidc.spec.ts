@@ -166,7 +166,11 @@ for (const theme of ["light", "dark"] as const) {
         await expect(step).toBeVisible();
         // The tour's own words, and the next step it repeats from Get started, name neither the
         // way in nor the provider.
-        const words = await step.locator("h2, p, li").allTextContents();
+        // Read through a CSS locator, not through `step`: Firefox crashes when Playwright reads an
+        // aria-labelledby element's references in both its own world and the page's (a named
+        // getByRole, then allTextContents). Mozilla bug 2090055; Playwright #43967, fixed in its
+        // Firefox build 1575 and later.
+        const words = await page.locator(".palette-dialog").locator("h2, p, li").allTextContents();
         expect(words.length).toBeGreaterThan(1);
         expect(words.join(" ")).not.toMatch(/passkey|provider|Okta/i);
         seen.push((await step.getByRole("heading", { level: 2 }).textContent()) ?? "");
