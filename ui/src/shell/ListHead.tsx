@@ -10,7 +10,7 @@ import { SortHeader } from "./SortHeader";
 import type { ListSortState } from "./useListSort";
 
 /** How the columns of a {@link ListHead} sort. */
-export interface ListHeadSorts<F extends string> {
+interface ListHeadSorts<F extends string> {
   /** Each visible column's field, in the order of `columns`; null for one that does not sort. */
   readonly by: readonly (F | null)[];
   /** The list's sort. */
