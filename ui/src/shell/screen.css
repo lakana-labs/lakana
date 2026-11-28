@@ -375,6 +375,8 @@ tr:hover .chevron {
   position: absolute;
   top: var(--space-4);
   right: var(--space-4);
+  /* Opaque: a scrolled body passes behind the ×, never shows through it. */
+  background: var(--color-float);
 }
 
 .dialog:has(> .dialog-framed) {
@@ -394,6 +396,8 @@ tr:hover .chevron {
   min-height: 0;
   overflow-y: auto;
   padding: var(--space-5);
+  /* A control the focus moves to scrolls clear of the × above it. */
+  scroll-padding-top: calc(var(--space-4) + var(--control-height));
 }
 
 .dialog:has(.dialog-close) h2[slot="title"] {

@@ -259,33 +259,6 @@ for (const theme of ["light", "dark"] as const) {
       expect(errors).toEqual([]);
     });
 
-    test("a tall Add rule keeps its × in reach on a phone, and the × closes it", async ({
-      page,
-    }) => {
-      await stubCiTrust(page);
-      await stubEnvironments(page);
-      await page.setViewportSize({ width: 390, height: 640 });
-      await page.goto(PLACE);
-      const add = page.getByRole("button", { name: "Add rule" });
-      await add.click();
-      const dialog = page.getByRole("dialog", { name: "Add a CI trust rule" });
-      await expect(dialog).toBeVisible();
-      const body = dialog.locator(".dialog-body");
-      const close = dialog.getByRole("button", { name: "Close dialog" });
-
-      const tall = await body.evaluate((element) => element.scrollHeight > element.clientHeight);
-      expect(tall, "Add rule is taller than a phone's window").toBe(true);
-      await body.evaluate((element) => {
-        element.scrollTop = element.scrollHeight;
-      });
-      await expect(dialog.getByRole("button", { name: "Cancel" })).toBeInViewport();
-      await expect(close).toBeInViewport({ ratio: 1 });
-
-      await close.click();
-      await expect(dialog).toBeHidden();
-      await expect(add).toBeFocused();
-    });
-
     test("320 px", async ({ page }) => {
       await stubCiTrust(page);
       await stubEnvironments(page);
@@ -313,3 +286,54 @@ for (const theme of ["light", "dark"] as const) {
     });
   });
 }
+
+test("a tall Add rule keeps its × in reach on a phone, over no control, and the × closes it", async ({
+  page,
+}) => {
+  await signInAsAdmin(page);
+  await stubCiTrust(page);
+  await stubEnvironments(page);
+  await page.setViewportSize({ width: 390, height: 640 });
+  await page.goto(PLACE);
+  const add = page.getByRole("button", { name: "Add rule" });
+  await add.click();
+  const dialog = page.getByRole("dialog", { name: "Add a CI trust rule" });
+  await expect(dialog).toBeVisible();
+  const body = dialog.locator(".dialog-body");
+  const close = dialog.getByRole("button", { name: "Close dialog" });
+
+  const tall = await body.evaluate((element) => element.scrollHeight > element.clientHeight);
+  expect(tall, "Add rule is taller than a phone's window").toBe(true);
+  expect(await violations(page), "Add rule at phone width").toEqual([]);
+
+  // A control at the right edge scrolled up under the ×: given the focus, it scrolls clear of it.
+  const remove = dialog.getByRole("button", { name: /^Remove/ }).first();
+  await remove.evaluate((control) => {
+    const scroller = control.closest(".dialog-body");
+    if (scroller === null) throw new Error("Add rule has no scrolling body");
+    scroller.scrollTop +=
+      control.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 4;
+  });
+  await remove.focus();
+  const [x, r] = await Promise.all([close.boundingBox(), remove.boundingBox()]);
+  expect(x).not.toBeNull();
+  expect(r).not.toBeNull();
+  if (x !== null && r !== null) {
+    const overlaps =
+      r.x < x.x + x.width && x.x < r.x + r.width && r.y < x.y + x.height && x.y < r.y + r.height;
+    expect(overlaps, "the focused control is not under the ×").toBe(false);
+  }
+  const background = await close.evaluate((element) => getComputedStyle(element).backgroundColor);
+  expect(background, "the × hides what scrolls behind it").not.toBe("rgba(0, 0, 0, 0)");
+
+  await body.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeInViewport();
+  await expect(close).toBeInViewport({ ratio: 1 });
+  expect(await violations(page), "Add rule scrolled to its foot").toEqual([]);
+
+  await close.click();
+  await expect(dialog).toBeHidden();
+  await expect(add).toBeFocused();
+});

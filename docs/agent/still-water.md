@@ -95,7 +95,11 @@ copied into both of its schemes in the same change, or `scripts/tests/test_docs_
   `ActionDialog` adds it): named "Close dialog", it calls the same handler as the dialog's
   Cancel or Close and Escape (and so whatever that handler asks first), comes last in the Tab
   order and stands beside the title (`.dialog-close`), whose heading leaves it room. A new modal
-  that does not use `ActionDialog` adds `DialogClose` itself (#855). The tour and the command
+  that does not use `ActionDialog` adds `DialogClose` itself (#855), and to keep the × in reach
+  in a tall dialog it also puts `dialog-framed` on its `Dialog` and its content in a
+  `div.dialog-body`, which scrolls in place of the dialog, as Keyboard shortcuts and Defined in
+  do: the × is opaque and the body's `scroll-padding-top` keeps a focused control clear of it.
+  The tour and the command
   palette are not dialogs of this kind: the tour ends with its own buttons, the palette is a
   search field.
 - **Breadcrumbs on every detail page:** pass `trail` to `Page`; never a breadcrumb on an area's
