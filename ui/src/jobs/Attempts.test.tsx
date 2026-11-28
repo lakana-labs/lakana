@@ -83,6 +83,7 @@ describe("Attempts", () => {
         attempts={[
           anAttempt({ outcome: "failed", worker: "w-2", failure: aFailure("memory_spike") }),
           anAttempt({ attempt: 2, outcome: "timed_out", worker: "w-1" }),
+          anAttempt({ attempt: 3, outcome: null, finished_at: null, worker: "w-3" }),
         ]}
       />,
       { wrapper: MemoryRouter },
@@ -97,9 +98,14 @@ describe("Attempts", () => {
       expect(sortState(region, column)).not.toBeNull();
     }
     await sortBy(user, region, "Worker");
-    expect(columnTexts(region, 1)).toEqual(["w-1", "w-2"]);
+    expect(columnTexts(region, 1)).toEqual(["w-1", "w-2", "w-3"]);
     await sortBy(user, region, "Attempt");
-    expect(columnTexts(region)).toEqual(["1", "2"]);
+    expect(columnTexts(region)).toEqual(["1", "2", "3"]);
+    // A running attempt has no duration yet: it comes last either way.
+    await sortBy(user, region, "Duration");
+    expect(columnTexts(region, 1)[2]).toBe("w-3");
+    await sortBy(user, region, "Duration");
+    expect(columnTexts(region, 1)[2]).toBe("w-3");
   });
 
   it("an unmeasured figure shows a dash for the eye and words for a screen reader, never zero", () => {

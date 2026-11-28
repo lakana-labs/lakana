@@ -21,7 +21,6 @@ import { failureCode } from "./status";
 /** The outcomes that have words of their own; another shows as the server sent it. */
 const OUTCOMES = ["succeeded", "failed", "timed_out", "lost", "released", "cancelled"];
 
-/** The columns, in order, and whether each holds a number. */
 /** A column of the attempts. */
 type AttemptField =
   | "attempt"
@@ -53,6 +52,7 @@ const ATTEMPT_SORT: ListSortSpec<AttemptField> = {
   param: "attempts",
 };
 
+/** The columns, in order, and whether each holds a number. */
 const COLUMNS: readonly (readonly [AttemptField, boolean])[] = [
   ["attempt", true],
   ["worker", false],
