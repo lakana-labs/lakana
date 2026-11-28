@@ -918,13 +918,15 @@ def test_list_all_sorts_by_every_column_a_missing_time_last(session: Session) ->
     session.commit()
     service = PatService(session, _auditing(session))
 
-    def walk(**sort: str) -> list[str]:
+    def walk(sort: str | None = None, order: str | None = None) -> list[str]:
         """Read every live token one a page.
 
         Parameters
         ----------
-        **sort
-            `sort` and `order`.
+        sort
+            The field.
+        order
+            The direction.
 
         Returns
         -------
@@ -934,7 +936,7 @@ def test_list_all_sorts_by_every_column_a_missing_time_last(session: Session) ->
         seen: list[str] = []
         cursor: str | None = None
         while True:
-            page = service.list_all(ada, limit=1, cursor=cursor, **sort)
+            page = service.list_all(ada, limit=1, cursor=cursor, sort=sort, order=order)
             seen.extend(listed.token.key_id for listed in page.items)
             if page.next_cursor is None:
                 return seen

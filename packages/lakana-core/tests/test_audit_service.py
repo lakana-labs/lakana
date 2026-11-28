@@ -450,13 +450,15 @@ def test_query_sorts_by_event_who_and_on_one_a_page(session: Session) -> None:
     session.commit()
     e0, e1, e2, e3 = ids
 
-    def walk(**sort: str) -> list[uuid.UUID]:
+    def walk(sort: str | None = None, order: str | None = None) -> list[uuid.UUID]:
         """Read every event one a page.
 
         Parameters
         ----------
-        **sort
-            `sort` and `order`.
+        sort
+            The field.
+        order
+            The direction.
 
         Returns
         -------
@@ -472,13 +474,14 @@ def test_query_sorts_by_event_who_and_on_one_a_page(session: Session) -> None:
                 cursor=cursor,
                 event_type=None,
                 until=start + timedelta(minutes=30),
-                **sort,
+                sort=sort,
+                order=order,
             )
             seen.extend(e.id for e in page.items)
             if page.next_cursor is None:
                 return seen
             cursor = page.next_cursor
-            assert cursor.sort.startswith(sort["sort"])
+            assert sort is not None and cursor.sort.startswith(sort)
 
     assert walk(sort="who") == [e3, e0, e1, e2]
     assert walk(sort="who", order="desc") == [e1, e3, e0, e2]

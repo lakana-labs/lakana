@@ -1615,13 +1615,15 @@ def test_dropped_tables_sort_by_name_and_purge_one_a_page(
         )
     session.commit()
 
-    def walk(**sort: str) -> list[uuid.UUID]:
+    def walk(sort: str | None = None, order: str | None = None) -> list[uuid.UUID]:
         """Read every dropped table one a page.
 
         Parameters
         ----------
-        **sort
-            `sort` and `order`.
+        sort
+            The field.
+        order
+            The direction.
 
         Returns
         -------
@@ -1632,7 +1634,7 @@ def test_dropped_tables_sort_by_name_and_purge_one_a_page(
         cursor: str | None = None
         while True:
             page = catalog.list_environment_dropped_tables(
-                principal, "dev", limit=1, cursor=cursor, **sort
+                principal, "dev", limit=1, cursor=cursor, sort=sort, order=order
             )
             seen.extend(d.table_id for d in page.items)
             if page.next_cursor is None:

@@ -1403,7 +1403,8 @@ def test_masks_sort_by_whom_where_and_column_and_page_without_a_gap(session: Ses
             table=table,
             column=column,
             expression="NULL",
-            **subject,
+            principal=subject.get("principal"),
+            group=subject.get("group"),
         )
         for subject, table, column in (
             ({"principal": "alice"}, "customers", "ssn"),
@@ -1416,13 +1417,15 @@ def test_masks_sort_by_whom_where_and_column_and_page_without_a_gap(session: Ses
     session.commit()
     m1, m2, m3 = (mask.id for mask in made)
 
-    def walk(**sort: str) -> list[uuid.UUID]:
+    def walk(sort: str | None = None, order: str | None = None) -> list[uuid.UUID]:
         """Read every mask one a page.
 
         Parameters
         ----------
-        **sort
-            `sort` and `order`.
+        sort
+            The field.
+        order
+            The direction.
 
         Returns
         -------
@@ -1432,7 +1435,7 @@ def test_masks_sort_by_whom_where_and_column_and_page_without_a_gap(session: Ses
         seen: list[uuid.UUID] = []
         cursor: str | None = None
         while True:
-            page = service.list_page(admin, limit=1, cursor=cursor, **sort)
+            page = service.list_page(admin, limit=1, cursor=cursor, sort=sort, order=order)
             seen.extend(mask.id for mask in page.items)
             if page.next_cursor is None:
                 return seen

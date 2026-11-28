@@ -952,13 +952,15 @@ def test_list_live_sorts_by_every_column_one_a_page(session: Session, tmp_path: 
     t1, t3, t2 = by_hand.key_id, other.key_id, bound.key_id
     service = _listing_service(session)
 
-    def walk(**sort: str) -> list[str]:
+    def walk(sort: str | None = None, order: str | None = None) -> list[str]:
         """Read every live token one a page.
 
         Parameters
         ----------
-        **sort
-            `sort` and `order`.
+        sort
+            The field.
+        order
+            The direction.
 
         Returns
         -------
@@ -968,7 +970,7 @@ def test_list_live_sorts_by_every_column_one_a_page(session: Session, tmp_path: 
         seen: list[str] = []
         cursor: str | None = None
         while True:
-            page = service.list_live(admin, limit=1, cursor=cursor, **sort)
+            page = service.list_live(admin, limit=1, cursor=cursor, sort=sort, order=order)
             seen.extend(item.token.key_id for item in page.items)
             if page.next_cursor is None:
                 return seen

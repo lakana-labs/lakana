@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from functools import partial
 from datetime import UTC, datetime, timedelta
+from functools import partial
 
 import pytest
 from sqlalchemy import select
@@ -518,7 +518,13 @@ def test_list_grants_by_role_lists_exactly_that_role(session: Session, setup: _S
         service.list_grants(setup.admin, role=Role.ANALYST, action=Action.READ_TABLE)
 
 
-def _walk_grants(service: GrantService, admin: PrincipalRef, **sort: str) -> list[uuid.UUID]:
+def _walk_grants(
+    service: GrantService,
+    admin: PrincipalRef,
+    sort: str | None = None,
+    order: str | None = None,
+    principal_name: str | None = None,
+) -> list[uuid.UUID]:
     """Read every grant one a page, in a sort.
 
     Parameters
@@ -527,8 +533,12 @@ def _walk_grants(service: GrantService, admin: PrincipalRef, **sort: str) -> lis
         The grant service.
     admin
         The administrator who lists.
-    **sort
-        `sort` and `order`.
+    sort
+        The field.
+    order
+        The direction.
+    principal_name
+        Only this principal's grants.
 
     Returns
     -------
@@ -538,7 +548,14 @@ def _walk_grants(service: GrantService, admin: PrincipalRef, **sort: str) -> lis
     seen: list[uuid.UUID] = []
     cursor: str | None = None
     while True:
-        page = service.list_grants(admin, limit=1, cursor=cursor, **sort)
+        page = service.list_grants(
+            admin,
+            limit=1,
+            cursor=cursor,
+            sort=sort,
+            order=order,
+            principal_name=principal_name,
+        )
         seen.extend(_ids(page.items))
         if page.next_cursor is None:
             return seen

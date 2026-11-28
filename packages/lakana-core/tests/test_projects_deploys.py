@@ -5348,13 +5348,15 @@ def test_orphans_sort_by_name_and_kind_one_a_page(
     """By the table's name, then its repository; one kind of each sorts by name too."""
     service = _orphans_of_two_repositories(session, principal, tmp_path)
 
-    def walk(**sort: str) -> list[tuple[str, str]]:
+    def walk(sort: str | None = None, order: str | None = None) -> list[tuple[str, str]]:
         """Read every orphan one a page.
 
         Parameters
         ----------
-        **sort
-            `sort` and `order`.
+        sort
+            The field.
+        order
+            The direction.
 
         Returns
         -------
@@ -5364,7 +5366,9 @@ def test_orphans_sort_by_name_and_kind_one_a_page(
         seen: list[tuple[str, str]] = []
         cursor: str | None = None
         while True:
-            report = service.orphans(principal, "dev", limit=1, cursor=cursor, **sort)
+            report = service.orphans(
+                principal, "dev", limit=1, cursor=cursor, sort=sort, order=order
+            )
             seen += [(o.repository, o.table) for o in report.orphans]
             if report.next_cursor is None:
                 return seen

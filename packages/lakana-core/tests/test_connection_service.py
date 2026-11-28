@@ -3352,13 +3352,15 @@ def test_the_cross_environment_list_sorts_by_environment_and_kind_then_name(worl
         _made_at(world, environment, name, _NOW + timedelta(minutes=minute))
     service = world.connections()
 
-    def walk(**sort: str) -> list[str]:
+    def walk(sort: str | None = None, order: str | None = None) -> list[str]:
         """Read every connection one a page.
 
         Parameters
         ----------
-        **sort
-            `sort` and `order`.
+        sort
+            The field.
+        order
+            The direction.
 
         Returns
         -------
@@ -3368,7 +3370,9 @@ def test_the_cross_environment_list_sorts_by_environment_and_kind_then_name(worl
         seen: list[str] = []
         cursor: str | None = None
         while True:
-            page = service.list_all(world.data_engineer, limit=1, cursor=cursor, **sort)
+            page = service.list_all(
+                world.data_engineer, limit=1, cursor=cursor, sort=sort, order=order
+            )
             seen += [view.name for view in page.items]
             if page.next_cursor is None:
                 return seen

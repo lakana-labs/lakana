@@ -29,6 +29,7 @@ from lakana_core.connections.service import _connection_page
 from lakana_core.db import create_engine
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
+from lakana_core.grants.service import GrantService
 from lakana_core.identity.principals import PrincipalService
 from lakana_core.models import (
     AuditEventType,
@@ -127,7 +128,8 @@ def _runs(session: Session) -> None:
             )
         )
     service = RunService(session, GrantAuthorization(session))
-    for sort in ("name", "status", "created"):
+    # `duration` measures on Postgres by its epoch difference, `tasks` by a correlated count.
+    for sort in ("name", "status", "created", "environment", "trigger", "duration", "tasks"):
         for order in ("asc", "desc"):
             seen: list[uuid.UUID] = []
             cursor = None
@@ -236,12 +238,46 @@ def _audit(session: Session) -> None:
             break
         cursor = page.next_cursor
     assert seen == newest[::-1]
+    for sort in ("event", "who", "on"):
+        seen = []
+        cursor = None
+        while True:
+            page = service.query(admin, limit=1, cursor=cursor, sort=sort, until=_T0)
+            seen += [e.id for e in page.items]
+            if page.next_cursor is None:
+                break
+            cursor = page.next_cursor
+        assert sorted(seen) == sorted(newest), sort
+
+
+def _grants(session: Session) -> None:
+    """Check that grants sort by whom (a subquery of two names) and by place, every grant once.
+
+    Parameters
+    ----------
+    session
+        A session on Postgres.
+    """
+    admin = person(session, "root")
+    grant(session, admin, role=Role.ADMIN)
+    for name in _NAMES:
+        grant(session, person(session, name), role=Role.ANALYST)
+    service = GrantService(session, GrantAuthorization(session))
+    every = sorted(g.id for g in service.list_grants(admin, limit=200).items)
+    for sort in ("who", "what", "on", "granted"):
+        for order in ("asc", "desc"):
+            got = _walk(
+                lambda c, s=sort, o=order: service.list_grants(
+                    admin, limit=1, cursor=c, sort=s, order=o
+                )
+            )
+            assert sorted(g.id for g in got) == every, (sort, order)
 
 
 def test_the_sorted_lists_page_every_row_once_on_postgres(tmp_path: Path) -> None:
     with PostgresContainer("postgres:16", driver="pg8000") as pg:
         engine = create_engine(DatabaseConfig(url=pg.get_connection_url()))
-        for check in (_principals, _runs, _connections, _audit):
+        for check in (_principals, _runs, _connections, _audit, _grants):
             Base.metadata.drop_all(engine)
             Base.metadata.create_all(engine)
             with Session(engine) as session:

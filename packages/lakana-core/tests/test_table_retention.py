@@ -1186,13 +1186,15 @@ def test_the_expiring_list_sorts_by_name_one_a_page(
     """By the table's name, then its namespace; the latest expiry first when asked."""
     _expiring_catalog(session, principal, catalog)
 
-    def walk(**sort: str) -> list[str]:
+    def walk(sort: str | None = None, order: str | None = None) -> list[str]:
         """Read every expiring table one a page.
 
         Parameters
         ----------
-        **sort
-            `sort` and `order`.
+        sort
+            The field.
+        order
+            The direction.
 
         Returns
         -------
@@ -1203,7 +1205,7 @@ def test_the_expiring_list_sorts_by_name_one_a_page(
         cursor: str | None = None
         while True:
             page = catalog.list_expiring_tables(
-                principal, "dev", within_days=7, limit=1, cursor=cursor, **sort
+                principal, "dev", within_days=7, limit=1, cursor=cursor, sort=sort, order=order
             )
             seen += [entry.ref.dotted() for entry in page.items]
             if page.next_cursor is None:

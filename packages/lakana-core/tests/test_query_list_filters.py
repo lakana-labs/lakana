@@ -258,13 +258,15 @@ def test_a_sort_orders_the_same_rows_across_the_parts_one_a_page(
     )
     service = QueryService(session, SUBMITTER)
 
-    def walk(**sort: str) -> list[uuid.UUID]:
+    def walk(sort: str | None = None, order: str | None = None) -> list[uuid.UUID]:
         """Read every query one a page.
 
         Parameters
         ----------
-        **sort
-            `sort` and `order`.
+        sort
+            The field.
+        order
+            The direction.
 
         Returns
         -------
@@ -275,7 +277,7 @@ def test_a_sort_orders_the_same_rows_across_the_parts_one_a_page(
         cursor: str | None = None
         while True:
             items, cursor = service.list_queries_page(
-                principal, "dev", include_ended=True, limit=1, cursor=cursor, **sort
+                principal, "dev", include_ended=True, limit=1, cursor=cursor, sort=sort, order=order
             )
             seen += _ids(items)
             if cursor is None:
