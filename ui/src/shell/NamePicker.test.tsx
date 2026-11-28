@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../api/client";
 import { type NameChoice, type NameMatches, NamePicker, type NameSearch } from "./NamePicker";
+import { PendingButton } from "./PendingButton";
 
 /**
  * A suggestion without data.
@@ -705,6 +706,111 @@ describe("NamePicker", () => {
     await user.keyboard("{Enter}");
 
     expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing on Enter with the list open while the form's PendingButton waits", async () => {
+    const user = userEvent.setup();
+    const { search, calls } = heldSearch();
+    const sent = vi.fn();
+    render(
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          sent();
+        }}
+      >
+        <Harness search={search} />
+        <PendingButton type="submit" className="button" pending>
+          Add
+        </PendingButton>
+      </form>,
+    );
+
+    await user.click(screen.getByRole("combobox"));
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    act(() => {
+      calls[0]?.answer({ choices: [aChoice("maria")], more: false });
+    });
+    await screen.findByRole("option");
+    await user.keyboard("{Enter}");
+
+    expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("sends the form once, through its submit button, on Enter with the list open", async () => {
+    const user = userEvent.setup();
+    const { search, calls } = heldSearch();
+    const submitters: (string | undefined)[] = [];
+    render(
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const submitter = (event.nativeEvent).submitter;
+          submitters.push(submitter?.textContent);
+        }}
+      >
+        <Harness search={search} />
+        <input type="email" aria-label="Email" />
+        <button>Add</button>
+      </form>,
+    );
+
+    await user.click(screen.getByRole("combobox"));
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    act(() => {
+      calls[0]?.answer({ choices: [aChoice("maria")], more: false });
+    });
+    await screen.findByRole("option");
+    await user.keyboard("{Enter}");
+
+    expect(submitters).toEqual(["Add"]);
+  });
+
+  it("sends no form without a submit button when another text field is in it", async () => {
+    const user = userEvent.setup();
+    const { search, calls } = heldSearch();
+    const sent = vi.fn();
+    render(
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          sent();
+        }}
+      >
+        <Harness search={search} />
+        <input type="email" aria-label="Email" />
+      </form>,
+    );
+
+    await user.click(screen.getByRole("combobox"));
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    act(() => {
+      calls[0]?.answer({ choices: [aChoice("maria")], more: false });
+    });
+    await screen.findByRole("option");
+    await user.keyboard("{Enter}");
+
+    expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("asks nothing for the empty field when typing follows a click at once", async () => {
+    const user = userEvent.setup();
+    const { search, calls } = heldSearch();
+    render(<Harness search={search} />);
+
+    await user.click(screen.getByRole("combobox"));
+    await user.keyboard("ma");
+
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    expect(calls[0]?.text).toBe("ma");
   });
 
   it("takes a pasted exact name as it is and suggests it", async () => {

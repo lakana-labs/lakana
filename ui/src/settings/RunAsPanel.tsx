@@ -77,6 +77,8 @@ function SetRunAsDialog({
       <Form
         onSubmit={(event) => {
           event.preventDefault();
+          // Sent again while the change waits, the form changes nothing more.
+          if (attempt.busy) return;
           attempt.run(async () => {
             await setRunAs(environment, deployment.repository, name);
             onDone(name);

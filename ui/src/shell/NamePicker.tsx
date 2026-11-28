@@ -184,22 +184,46 @@ function useNameSearch<T>(search: NameSearch<T> | null): NameSearchState<T> {
   return { found, ask, settle };
 }
 
+/** The input types whose Enter sends a form by itself only when it is the form's one field. */
+const BLOCKING_TYPES = new Set([
+  "text",
+  "search",
+  "url",
+  "tel",
+  "email",
+  "password",
+  "date",
+  "month",
+  "week",
+  "time",
+  "datetime-local",
+  "number",
+]);
+
 /**
- * Sends a form as Enter in a text field does (HTML's implicit submission): through its first
- * submit button, which sends nothing while it is disabled; with none (a `PendingButton` that
- * waits is no submit button meanwhile), only a form with this one text field is sent.
+ * Sends a form as Enter in a text field does (HTML's implicit submission), over the form's
+ * elements (`form=` ones too): through its first submit button, which sends nothing while it is
+ * disabled; a `PendingButton` that waits (React Aria makes it `type="button"` meanwhile) holds
+ * the form, so nothing is sent; with no submit button at all, only a form with this one field
+ * that blocks implicit submission is sent.
  *
  * @param form - The field's form, or null outside one.
  */
 function submitAsEnter(form: HTMLFormElement | null): void {
   if (form === null) return;
-  const button = form.querySelector<HTMLElement>('button[type="submit"], input[type="submit"]');
-  if (button !== null) {
+  const elements = [...form.elements];
+  if (elements.some((element) => element.matches("button[data-pending]"))) return;
+  const button = elements.find(
+    (element): element is HTMLButtonElement | HTMLInputElement =>
+      (element instanceof HTMLButtonElement || element instanceof HTMLInputElement) &&
+      element.type === "submit",
+  );
+  if (button !== undefined) {
     button.click();
     return;
   }
-  const fields = form.querySelectorAll(
-    'input:not([type]), input[type="text"], input[type="search"]',
+  const fields = elements.filter(
+    (element) => element instanceof HTMLInputElement && BLOCKING_TYPES.has(element.type),
   );
   if (fields.length === 1) form.requestSubmit();
 }
