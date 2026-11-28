@@ -5,8 +5,10 @@ CI's binding is covered, unchanged, by `test_ci_oidc_jwks.py`.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Collection
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 from ci_oidc_test_helpers import (
@@ -143,6 +145,173 @@ def test_current_discovery_needs_the_latest_fetch_to_have_worked() -> None:
     fetcher.documents[DISCOVERY] = {**discovery(), "token_endpoint": f"{ISSUER}/token"}
     clock.now += 1
     assert cache.current_discovery(ISSUER) == first
+
+
+def test_a_start_during_a_fetch_does_not_wait_for_it() -> None:
+    """A start answers from the latest finished fetch: a running one can take up to 25 s."""
+    fetcher, clock = published(), Clock()
+    during: list[object] = []
+    caches: list[JwksCache] = []
+
+    def slow(url: str, allowed_hosts: Collection[str]) -> object:
+        """Ask for the document while this fetch runs, then answer.
+
+        Parameters
+        ----------
+        url
+            The URL.
+        allowed_hosts
+            The host names it may be on.
+
+        Returns
+        -------
+        object
+            The document.
+        """
+        if url == DISCOVERY:
+            try:
+                during.append(caches[0].current_discovery(ISSUER)["issuer"])
+            except IdTokenRefused as refused:
+                during.append(refused.code)
+        return fetcher(url, allowed_hosts)
+
+    caches.append(JwksCache(source(), fetcher=slow, clock=clock))
+    assert caches[0].current_discovery(ISSUER)["issuer"] == ISSUER
+    # During the first fetch nothing has finished yet: refused, without waiting.
+    assert during == [RefusalCode.KEYS_UNAVAILABLE]
+    clock.now += REFRESH_INTERVAL_SECONDS
+    fetcher.documents[DISCOVERY] = FetchFailed("offline")
+    with pytest.raises(IdTokenRefused):
+        caches[0].current_discovery(ISSUER)
+    # During that re-fetch the latest finished fetch had worked.
+    assert during == [RefusalCode.KEYS_UNAVAILABLE, ISSUER]
+
+
+class _Taken:
+    """A refresh lock another request holds before its fetch has begun."""
+
+    def acquire(self, blocking: bool = True) -> bool:
+        """Fail to take the lock.
+
+        Parameters
+        ----------
+        blocking
+            Must be false: a start never waits.
+
+        Returns
+        -------
+        bool
+            `False`.
+        """
+        assert blocking is False, "a start must never wait for a running fetch"
+        return False
+
+    def release(self) -> None:
+        """Let the lock go."""
+
+
+def test_a_start_that_finds_the_lock_taken_answers_from_the_latest_fetch() -> None:
+    fetcher, clock = published(), Clock()
+    cache = JwksCache(source(), fetcher=fetcher, clock=clock)
+    first = cache.current_discovery(ISSUER)
+    clock.now += REFRESH_INTERVAL_SECONDS
+    calls = len(fetcher.calls)
+    cache._issuers[ISSUER].refreshing = _Taken()  # ty: ignore[invalid-assignment]
+    assert cache.current_discovery(ISSUER) == first
+    assert len(fetcher.calls) == calls
+
+
+class _FetchedMeanwhile:
+    """A refresh lock that another request let go just before: it fetched meanwhile."""
+
+    def __init__(self, cache: JwksCache, clock: Clock) -> None:
+        self._cache, self._clock = cache, clock
+
+    def acquire(self, blocking: bool = True) -> bool:
+        """Take the lock after the other request's fetch.
+
+        Parameters
+        ----------
+        blocking
+            Must be false: a start never waits.
+
+        Returns
+        -------
+        bool
+            `True`.
+        """
+        assert blocking is False, "a start must never wait for a running fetch"
+        state = self._cache._issuers[ISSUER]
+        state.attempted_at = self._clock.now
+        return True
+
+    def release(self) -> None:
+        """Let the lock go."""
+
+
+def test_a_fetch_that_ran_meanwhile_is_not_repeated() -> None:
+    fetcher, clock = published(), Clock()
+    cache = JwksCache(source(), fetcher=fetcher, clock=clock)
+    cache.current_discovery(ISSUER)
+    clock.now += REFRESH_INTERVAL_SECONDS
+    calls = len(fetcher.calls)
+    cache._issuers[ISSUER].refreshing = _FetchedMeanwhile(cache, clock)  # ty: ignore[invalid-assignment]
+    assert cache.current_discovery(ISSUER)["issuer"] == ISSUER
+    assert len(fetcher.calls) == calls
+
+
+def test_a_start_returns_while_another_request_holds_the_lock() -> None:
+    """With the real lock held elsewhere, a start returns at once instead of waiting."""
+    fetcher, clock = published(), Clock()
+    cache = JwksCache(source(), fetcher=fetcher, clock=clock)
+    first = cache.current_discovery(ISSUER)
+    clock.now += REFRESH_INTERVAL_SECONDS
+    lock = cache._issuers[ISSUER].refreshing
+    answers: list[object] = []
+    assert lock.acquire()
+    try:
+        worker = threading.Thread(target=lambda: answers.append(cache.current_discovery(ISSUER)))
+        worker.start()
+        worker.join(timeout=5)
+        assert not worker.is_alive(), "the start waited for the lock"
+    finally:
+        lock.release()
+    assert answers == [first]
+
+
+def test_an_unexpected_error_while_fetching_fails_closed() -> None:
+    """Any failure of a fetch counts as failed, not only the expected ones."""
+    fetcher, clock = published(), Clock()
+    cache = JwksCache(source(), fetcher=fetcher, clock=clock)
+    cache.current_discovery(ISSUER)
+    clock.now += REFRESH_INTERVAL_SECONDS
+    calls = len(fetcher.calls)
+
+    def broken(url: str, allowed_hosts: Collection[str]) -> NoReturn:
+        """Fail in a way the cache does not expect.
+
+        Parameters
+        ----------
+        url
+            The URL.
+        allowed_hosts
+            Unused.
+
+        Raises
+        ------
+        RuntimeError
+            Always.
+        """
+        del url, allowed_hosts
+        raise RuntimeError("a bug in the fetcher")
+
+    cache._fetch = broken
+    with pytest.raises(RuntimeError):
+        cache.current_discovery(ISSUER)
+    with pytest.raises(IdTokenRefused) as info:
+        cache.current_discovery(ISSUER)
+    assert info.value.code is RefusalCode.KEYS_UNAVAILABLE
+    assert len(fetcher.calls) == calls
 
 
 def test_current_discovery_of_another_issuer_fetches_nothing() -> None:

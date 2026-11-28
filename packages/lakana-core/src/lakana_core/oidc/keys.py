@@ -16,7 +16,8 @@
   their freshness; after that every lookup fails closed.
 - `JwksCache.current_discovery`, asked before a browser is sent to the provider, wants more: the
   latest fetch must have worked. It fetches again once that fetch is `REFRESH_INTERVAL_SECONDS`
-  old, the same bound as every refresh, so it adds no request beyond one per interval.
+  old, the same bound as every refresh, so it adds no request beyond one per interval, and never
+  waits for a fetch another request runs: it answers from the latest finished fetch instead.
 - Only RSA signing keys are kept: an entry with another key type, ``use`` other than ``sig``,
   a private part or a malformed modulus is left out. Two keys with one ``kid`` make the whole set
   unusable. The key size is checked when a key is used (`SigningKey.bits`).
@@ -178,6 +179,8 @@ class _Issuer:
     # Replaced as a whole, so a reader needs no lock.
     snapshot: _Snapshot | None = None
     attempted_at: float | None = None
+    # Whether the fetch at `attempted_at` failed; `snapshot` then holds the last good one.
+    last_failed: bool = False
     refreshing: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -403,10 +406,16 @@ class JwksCache:
         """
         state.attempted_at = now
         reason = ""
+        failed = True
         try:
             state.snapshot = self._load(state.url, now)
-        except (FetchFailed, KeySetInvalid) as failed:
-            reason = failed.reason
+            failed = False
+        except (FetchFailed, KeySetInvalid) as refused:
+            reason = refused.reason
+        finally:
+            # Set once the fetch has ended, never before: until then a start answers from the
+            # previous fetch. Any exception, also an unexpected one, counts as a failure.
+            state.last_failed = failed
         if reason:
             self._log.warning(
                 "could not fetch the %s keys of %s: %s", self._source.label, state.url, reason
@@ -528,7 +537,9 @@ class JwksCache:
         latest fetch is `REFRESH_INTERVAL_SECONDS` old (at most one fetch per interval, as for
         every refresh); the document is returned only if that fetch, or the latest one within
         the interval, worked. A failure keeps the last good document for `discovery` and the
-        keys for `signing_key`.
+        keys for `signing_key`. A call that finds a fetch running in another request does not
+        wait for it: it answers at once from the latest finished fetch, and is refused when
+        that failed or there is none yet.
 
         Parameters
         ----------
@@ -544,16 +555,36 @@ class JwksCache:
         ------
         IdTokenRefused
             `ISSUER_NOT_ALLOWED` for an issuer that is not configured (nothing is fetched),
-            `KEYS_UNAVAILABLE` when the latest fetch failed.
+            `KEYS_UNAVAILABLE` when the latest finished fetch failed, or none has finished.
         """
         state = self._issuers.get(issuer)
         if state is None:
             raise self._refusal(RefusalCode.ISSUER_NOT_ALLOWED)
-        with state.refreshing:
-            now = self._clock()
-            if state.attempted_at is None or now - state.attempted_at >= REFRESH_INTERVAL_SECONDS:
-                self._refresh(state, now)
-            snapshot = state.snapshot
-            if snapshot is None or snapshot.fetched_at != state.attempted_at:
-                raise self._refusal(RefusalCode.KEYS_UNAVAILABLE)
-            return snapshot.document
+        # Never wait for a fetch another request runs: against a provider that drops packets
+        # it takes up to about 25 s. Such a call answers from the latest finished fetch.
+        if self._fetch_due(state) and state.refreshing.acquire(blocking=False):
+            try:
+                if self._fetch_due(state):
+                    self._refresh(state, self._clock())
+            finally:
+                state.refreshing.release()
+        snapshot = state.snapshot
+        if snapshot is None or state.last_failed:
+            raise self._refusal(RefusalCode.KEYS_UNAVAILABLE)
+        return snapshot.document
+
+    def _fetch_due(self, state: _Issuer) -> bool:
+        """Tell whether the latest fetch is old enough to fetch again.
+
+        Parameters
+        ----------
+        state
+            The issuer's cache state.
+
+        Returns
+        -------
+        bool
+            `True` before the first fetch and once the latest is `REFRESH_INTERVAL_SECONDS` old.
+        """
+        attempted = state.attempted_at
+        return attempted is None or self._clock() - attempted >= REFRESH_INTERVAL_SECONDS
