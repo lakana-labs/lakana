@@ -89,7 +89,8 @@ and nothing is created. The message names the grant that already gives the acces
 was created.` To take the access away, revoke that one grant with `lakana grant revoke ID`.
 
 In the web interface, an administrator does the same under **Settings → Access → Grants**: **Add
-grant** asks who (a person or a group, whose name it suggests as you type), a role or a single
+grant** asks who (a person or a group, whose name it suggests as you type; a click into the empty
+field lists the first names), a role or a single
 action, and where, and it asks for the
 environment unless the grant is on the whole instance; the list's Who filter suggests the names
 the same way. **Settings → Access → Groups** creates a
