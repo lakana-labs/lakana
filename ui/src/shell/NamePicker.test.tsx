@@ -747,7 +747,7 @@ describe("NamePicker", () => {
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          const submitter = (event.nativeEvent).submitter;
+          const submitter = event.nativeEvent.submitter;
           submitters.push(submitter?.textContent);
         }}
       >
