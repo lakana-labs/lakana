@@ -569,13 +569,23 @@ def test_the_release_builds_the_interface_before_the_wheels() -> None:
 
 
 def test_the_release_runs_every_browser_before_the_approval() -> None:
-    """The full Playwright suite runs in Chromium, Firefox and WebKit on the release's tag."""
+    """The full Playwright suite runs in Chromium, Firefox and WebKit on the release's tag.
+
+    One browser per matrix leg, each in its own 30 minutes, none cancelling the others: the three
+    in one job outgrew 30 minutes at 0.23.0. ``approve`` needs the job, so it waits for every leg.
+    """
     jobs = _jobs("release.yml")
     job = jobs["ui-browsers"]
     assert job["needs"] == "release-please"
     assert job["if"] == "needs.release-please.outputs.released == 'true'"
     assert job["runs-on"] == "ubuntu-latest"
     assert job["permissions"] == {"contents": "read"}
+    assert job["timeout-minutes"] == 30
+    assert job["strategy"] == {
+        "fail-fast": False,
+        "matrix": {"browser": ["chromium", "firefox", "webkit"]},
+    }
+    assert job["name"] == "ui-browsers (${{ matrix.browser }})"
     steps = job["steps"]
     checkout = _step_index(
         steps, lambda s: str(s.get("uses", "")).startswith("actions/checkout@"), "checkout"
@@ -588,10 +598,14 @@ def test_the_release_runs_every_browser_before_the_approval() -> None:
         _step_index(steps, _runs("npm --prefix ui run build"), "the interface's build"),
         _step_index(
             steps,
-            _runs("npx --prefix ui playwright install --with-deps chromium firefox webkit"),
-            "the three browsers",
+            _runs("npx --prefix ui playwright install --with-deps ${{ matrix.browser }}"),
+            "the leg's browser",
         ),
-        _step_index(steps, _runs("npm --prefix ui run e2e:all"), "the full suite"),
+        _step_index(
+            steps,
+            _runs("npm --prefix ui run e2e:all -- --project=${{ matrix.browser }}"),
+            "the full suite in the leg's browser",
+        ),
     ]
     assert order == sorted(order)
     assert "ui-browsers" in jobs["approve"]["needs"]
@@ -2621,6 +2635,36 @@ def test_the_ui_browser_canary_has_the_least_privilege_on_github_s_runner() -> N
     assert isinstance(job["timeout-minutes"], int)
     checkout = next(s for s in job["steps"] if s.get("uses", "").startswith("actions/checkout@"))
     assert checkout["with"]["persist-credentials"] is False
+
+
+def test_the_ui_browser_canary_runs_both_suites_in_firefox_and_webkit_one_per_leg() -> None:
+    """Each of Firefox and WebKit runs the real-server tests, then the release's mocked suite.
+
+    The mocked suite runs in those browsers nowhere else before a release, so without it a test
+    that fails in one browser alone shows up only when a release is cut (0.23.0 did). It runs
+    after a failed server run as well, so one red night reports both.
+    """
+    job = _canary_job("ui-browsers")
+    assert job["strategy"] == {"fail-fast": False, "matrix": {"browser": ["firefox", "webkit"]}}
+    assert job["name"] == "ui-browsers (${{ matrix.browser }})"
+    steps = job["steps"]
+    install = _step_index(
+        steps,
+        _runs("npx --prefix ui playwright install --with-deps ${{ matrix.browser }}"),
+        "the leg's browser",
+    )
+    server = _step_index(
+        steps,
+        _runs("npm --prefix ui run e2e:server -- --project=${{ matrix.browser }}"),
+        "the real-server tests",
+    )
+    mocked = _step_index(
+        steps,
+        _runs("npm --prefix ui run e2e:all -- --project=${{ matrix.browser }}"),
+        "the mocked suite",
+    )
+    assert install < server < mocked
+    assert steps[mocked]["if"] == "${{ !cancelled() }}"
 
 
 def test_every_canary_action_is_pinned_by_commit() -> None:

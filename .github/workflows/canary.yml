@@ -4,8 +4,10 @@ name: Dependency canary
 # five-minute test. The lock cannot catch a breaking release of a dependency, because a
 # `pip install` ignores it: this job sees one within a day. A failure is a failed scheduled
 # run, which scheduled-failure.yml turns into an issue; this job writes nothing back. The second
-# job, `ui-browsers`, runs the sign-in end-to-end tests of the web interface against a real
-# lakana-server in Firefox and WebKit, which a pull request tests in Chromium only.
+# job, `ui-browsers`, runs the web interface's end-to-end tests in Firefox and WebKit, one browser
+# per leg, which a pull request tests in Chromium only: those against a real lakana-server, then
+# the whole mocked suite the release runs, so a test that fails in one browser alone shows up
+# within a day, not when a release is cut.
 
 on:
   schedule:
@@ -41,8 +43,13 @@ jobs:
         run: cat "$RUNNER_TEMP/out.md" >> "$GITHUB_STEP_SUMMARY" || true
 
   ui-browsers:
+    name: ui-browsers (${{ matrix.browser }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [firefox, webkit]
     permissions:
       contents: read
     steps:
@@ -59,5 +66,10 @@ jobs:
       - run: uv sync --all-packages --locked
       - run: npm ci --ignore-scripts --prefix ui
       - run: npm --prefix ui run build
-      - run: npx --prefix ui playwright install --with-deps firefox webkit
-      - run: npm --prefix ui run e2e:server -- --project=firefox --project=webkit
+      - run: npx --prefix ui playwright install --with-deps ${{ matrix.browser }}
+      - name: The end-to-end tests against a real lakana-server
+        run: npm --prefix ui run e2e:server -- --project=${{ matrix.browser }}
+      - name: The mocked end-to-end suite, as the release runs it
+        # Also after a failed server run, so one red run reports both suites.
+        if: ${{ !cancelled() }}
+        run: npm --prefix ui run e2e:all -- --project=${{ matrix.browser }}

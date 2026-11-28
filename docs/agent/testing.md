@@ -403,7 +403,12 @@ every missing output of it means "run everything".
   pull-request jobs cannot. A failure is a failed scheduled run, which `scheduled-failure.yml`
   turns into an issue (the canary job itself has `contents: read` only); the step summary lists the resolved
   versions (`pip freeze`) so the run names the release that broke it. It is outside `ci.yml` and
-  its `changes` gating, and on GitHub's runner whatever `CI_RUNNER` says.
+  its `changes` gating, and on GitHub's runner whatever `CI_RUNNER` says. Its second job,
+  `ui-browsers`, runs the interface's end-to-end tests in Firefox and WebKit, one browser per
+  matrix leg (`fail-fast: false`): first `e2e:server` against a real `lakana-server`, then the
+  whole mocked suite (`e2e:all`) that the release's `ui-browsers` runs, also after a failed server
+  run. A pull request runs both in Chromium only, so this is where a failure in one other browser
+  shows up, within a day instead of at release time.
 - **`security-deep.yml`** runs semgrep and Trivy weekly. The semgrep scan (a pinned image, no write
   scope, no token in the workspace) keeps its SARIF as an artifact; `semgrep-upload` alone has
   `security-events: write` and does nothing but upload it to code scanning. Dependabot does not
@@ -1409,7 +1414,8 @@ five).
     so it would flag every `{name}` that already went through `t()` or miss one passed through
     a local variable.
 - **Playwright.** Pull requests that touch `ui/` run the smoke test on Chromium; the full
-  three-browser suite (`npm --prefix ui run e2e:all`) runs on release. The tests run against
+  three-browser suite (`npm --prefix ui run e2e:all`) runs on release, one browser per job, and
+  every night in Firefox and WebKit (`canary.yml`). The tests run against
   `vite preview` of the production build, which sends the content security policy of
   `ui/csp.ts`, so a CSP violation shows as a console error. Every axe check runs through `runAxe`
   (`ui/e2e/axe.ts`: the WCAG 2.2 AA tags, without React Aria's live announcer). In Firefox it first

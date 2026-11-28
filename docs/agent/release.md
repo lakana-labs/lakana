@@ -258,9 +258,15 @@ not reach it (a target's own `artifacts` would replace the shared one;
   sends; without it the server refuses to start with the interface on) and
   `licenses/THIRD-PARTY-NOTICES.md` (the bundled packages' licence notices) are in the server
   wheel. The image installs that wheel, so it carries the same files.
-- **`ui-browsers`** runs the interface's whole Playwright suite (`e2e:all`) in Chromium, Firefox
-  and WebKit on the tag, read-only, before the approval; a pull request runs Chromium only (the
-  `ui (e2e smoke, N/2)` and `ui (e2e server)` jobs of `ci.yml`). A failure there stops the release before anything is published.
+- **`ui-browsers`** runs the interface's whole Playwright suite (`e2e:all`) on the tag, read-only,
+  before the approval, one browser per matrix leg (`--project=chromium`, `firefox`, `webkit`),
+  each with 30 minutes and `fail-fast: false`, so a failure in one browser still lets the other
+  two finish and report. The three in one job outgrew 30 minutes at 0.23.0 (WebKit alone takes
+  about 20). `approve` needs the job, so it waits for all three legs. A pull request runs Chromium
+  only (the `ui (e2e smoke, N/2)` and `ui (e2e server)` jobs of `ci.yml`); the daily canary
+  (`canary.yml`, job `ui-browsers`) runs the same suite in Firefox and WebKit, so a test that
+  fails in one browser alone shows up within a day rather than here. A failure there stops the
+  release before anything is published: fix it on `main` and release the next patch version.
 - A wheel built without the interface (CI's, a source checkout's) serves it only after
   `npm --prefix ui ci && npm --prefix ui run build`; with `LAKANA_UI__ENABLED=true` and no build,
   the server refuses to start and says so.
