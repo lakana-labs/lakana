@@ -105,12 +105,19 @@ jobs:
           path: dist/
 
   # The interface's full end-to-end suite in Chromium, Firefox and WebKit, on the release's tag
-  # (a pull request runs Chromium only). Read-only; the approval waits for it.
+  # (a pull request runs Chromium only), one browser per job: the three in one job outgrew its
+  # 30 minutes (WebKit alone takes about 20), and a failure in one browser still lets the other
+  # two report. Read-only; the approval waits for every leg.
   ui-browsers:
+    name: ui-browsers (${{ matrix.browser }})
     needs: release-please
     if: needs.release-please.outputs.released == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
     permissions:
       contents: read
     steps:
@@ -125,10 +132,10 @@ jobs:
         run: npm ci --ignore-scripts --prefix ui
       - name: Build the interface
         run: npm --prefix ui run build
-      - name: Install the three browsers
-        run: npx --prefix ui playwright install --with-deps chromium firefox webkit
-      - name: Every end-to-end test in every browser
-        run: npm --prefix ui run e2e:all
+      - name: Install the browser
+        run: npx --prefix ui playwright install --with-deps ${{ matrix.browser }}
+      - name: Every end-to-end test in the browser
+        run: npm --prefix ui run e2e:all -- --project=${{ matrix.browser }}
 
   # The one approval of a release: every job that publishes or signs anything waits for it, so
   # rejecting it publishes nothing. It runs no code and holds no permission; the reviewer is set
