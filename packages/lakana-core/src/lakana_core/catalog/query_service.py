@@ -929,10 +929,9 @@ class QueryService:
         cursor
             The `next_cursor` of the previous page. Send the same filters with every page.
         sort
-            ``created`` (when submitted) or ``status``, in one order across the parts; with
-            `order` also `None`, the list's own order.
+            The field, as `list_queries_page` takes it.
         order
-            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for ``status``.
+            The direction, as `list_queries_page` takes it.
 
         Returns
         -------

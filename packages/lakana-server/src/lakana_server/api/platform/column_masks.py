@@ -145,6 +145,9 @@ def create_column_mask(
     )
 
 
+# Each list route declares and documents its own query parameters, which the OpenAPI document and
+# the REST reference are built from; these repeat those of `list_row_filters`, with `column`.
+# jscpd:ignore-start
 @router.get("", response_model=list[ColumnMaskOut], responses=errors(403, 404))
 def list_column_masks(
     response: Response,
@@ -222,6 +225,7 @@ def list_column_masks(
     shown = service.shown(principal, page.items)
     names = subject_names(session, page.items)
     return [_to_out(row, shown[row.id], names) for row in page.items]
+    # jscpd:ignore-end
 
 
 @router.delete("/{column_mask_id}", status_code=204, responses=errors(403, 404, 409))

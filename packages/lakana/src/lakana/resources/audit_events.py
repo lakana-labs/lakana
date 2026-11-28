@@ -166,12 +166,9 @@ class AuditEvents:
             Only yield events of this kind, if given: ``connection`` is every
             ``CONNECTION_*`` type.
         sort
-            What the log is sorted by: ``occurred`` (the default), ``event``, ``who`` or
-            ``on`` (the environment, namespace and table); the events of one value come newest
-            first.
+            The field, as `list` takes it.
         order
-            ``desc`` (the default, the newest first) or ``asc``, the oldest first. Every order
-            lists the same events.
+            The direction, as `list` takes it. Every order lists the same events.
 
         Yields
         ------
