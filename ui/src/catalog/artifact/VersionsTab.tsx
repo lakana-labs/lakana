@@ -20,6 +20,9 @@ import "./artifactStrings";
 import { DeleteVersionDialog } from "./DeleteVersionDialog";
 import { ShowMore, useShowMore } from "./ShowMore";
 import { UploadsBlock } from "./UploadsBlock";
+import { type ListSortSpec, sortRows } from "../../shell/listSort";
+import { SortHeader } from "../../shell/SortHeader";
+import { useListSort } from "../../shell/useListSort";
 import { VersionFiles } from "./VersionFiles";
 
 /** How many characters of a commit the Stored column shows, as git's short form. */
@@ -90,6 +93,12 @@ function Stored({ row }: StoredProps): JSX.Element {
   );
 }
 
+/** The columns the versions sort by, in the browser: they are read whole, the newest first. */
+const VERSION_SORT: ListSortSpec<"version" | "stored" | "size" | "files"> = {
+  fields: { version: "desc", stored: "desc", size: "desc", files: "desc" },
+  natural: { field: "version", order: "desc" },
+};
+
 /**
  * Reads the versions and lists them. Files opens one version's files at a time below its row.
  * When a download finds its version gone, the versions are read again; once the list shows that
@@ -110,7 +119,14 @@ export default function VersionsTab(): JSX.Element | null {
     [environment, namespace, name],
   );
   const resource = useResource(load);
-  const versions = resource.data ?? [];
+  const sorting = useListSort(VERSION_SORT);
+  // Sorted whole, before Show more cuts it: the first rows are the first of the sort.
+  const versions = sortRows(resource.data ?? [], sorting.sort, {
+    version: (version) => version.version,
+    stored: (version) => version.created_at,
+    size: (version) => version.size_bytes,
+    files: (version) => version.file_count,
+  });
   const region = useRef<HTMLDivElement>(null);
   const rows = useShowMore(versions.length, region, ".version-number");
   const [open, setOpen] = useState<number | null>(null);
@@ -308,14 +324,18 @@ export default function VersionsTab(): JSX.Element | null {
             <table className="list list-static">
               <thead>
                 <tr>
-                  <th scope="col">{t("table.artifact.versions.columns.version")}</th>
-                  <th scope="col">{t("table.artifact.versions.columns.stored")}</th>
-                  <th scope="col" className="number">
+                  <SortHeader {...sorting.header("version")}>
+                    {t("table.artifact.versions.columns.version")}
+                  </SortHeader>
+                  <SortHeader {...sorting.header("stored")}>
+                    {t("table.artifact.versions.columns.stored")}
+                  </SortHeader>
+                  <SortHeader {...sorting.header("size")} className="number">
                     {t("table.artifact.versions.columns.size")}
-                  </th>
-                  <th scope="col" className="number">
+                  </SortHeader>
+                  <SortHeader {...sorting.header("files")} className="number">
                     {t("table.artifact.versions.columns.files")}
-                  </th>
+                  </SortHeader>
                   <th scope="col">
                     <span className="visually-hidden">
                       {t("table.artifact.versions.columns.actions")}
