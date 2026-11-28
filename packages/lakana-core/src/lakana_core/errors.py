@@ -329,11 +329,14 @@ class OidcSignInRefused(PermissionDenied):
         ``provider_refused``, ``flow_expired``; while linking or confirming (#32, PR 2)
         ``identity_taken``, ``identity_mismatch``, ``link_unusable``, ``last_unlinked_admin``,
         ``cannot_link_operator``, ``already_linked`` or ``auth_too_old``.
+    detail
+        The sentence, when the caller knows more than the reason (the start of a flow names
+        the provider and what is left to do); the reason's own sentence by default.
     """
 
-    def __init__(self, reason: OidcRefusal) -> None:
+    def __init__(self, reason: OidcRefusal, detail: str | None = None) -> None:
         self.reason = reason
-        super().__init__(_OIDC_REFUSED[reason])
+        super().__init__(_OIDC_REFUSED[reason] if detail is None else detail)
 
 
 class CliGrantRefused(LakanaError):

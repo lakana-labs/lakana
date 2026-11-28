@@ -731,7 +731,10 @@ is trusted is `docs/site/explanation/security.md`, "Signing in through your iden
   secret, are fetched only over `https` on the issuer's host or a host of
   `LAKANA_OIDC__ALLOW_HOSTS`, on port 443 or the issuer's own port, never on a loopback,
   link-local or metadata address, without redirects, at most 64 KiB in 10 s per request (a
-  callback with a cold cache makes up to three: discovery, keys, token endpoint).
+  callback with a cold cache makes up to three: discovery, keys, token endpoint). Before a start
+  sends the browser to the provider, the provider must have answered the latest fetch of
+  discovery and keys; that fetch is repeated once it is a minute old, the same bound every
+  refresh has, so a start adds no request beyond one per minute (#854).
 - **Account takeover by e-mail.** A person is found by the provider's `iss` and `sub` only; the
   e-mail address and the name are shown, never matched. An identity linked to nobody is refused
   (`not_linked`): the provider never creates an account.

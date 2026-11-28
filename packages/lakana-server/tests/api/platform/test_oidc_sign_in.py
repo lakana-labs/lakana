@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, cast
 from urllib.parse import parse_qs, unquote_plus, urlsplit
 
+import httpx
 import pytest
 from fastapi import FastAPI, Response
 from fastapi.testclient import TestClient
@@ -24,6 +25,7 @@ from sqlalchemy.orm import Session
 import lakana_server.ui
 from lakana_core.models import AuditEvent, AuditEventType, OidcFlow, Passkey, Principal
 from lakana_core.net.https_json import FetchFailed
+from lakana_core.oidc.keys import REFRESH_INTERVAL_SECONDS
 from lakana_core.oidc.provider import LOG_THROTTLE, OidcProvider
 from lakana_server.app import create_app
 from lakana_server.auth_rate_limit import AuthAuditLimiter
@@ -308,6 +310,63 @@ def test_start_with_an_unreachable_provider_is_refused(
         "provider_unreachable"
     ]
     assert _flows(client) == []
+
+
+def _goes_down(client: TestClient, fake: FakeProvider) -> None:
+    """Let the server fetch the provider's documents once, then stop the provider a minute later.
+
+    The documents stay cached (a callback could still use them), as when Keycloak stops.
+
+    Parameters
+    ----------
+    client
+        The browser.
+    fake
+        The provider.
+    """
+    seconds = [1000.0]
+    provider = fake.provider(clock=lambda: seconds[0])
+    cast(FastAPI, client.app).state.oidc_provider = provider
+    provider.metadata()
+    fake.documents[DISCOVERY] = FetchFailed("the host is unreachable")
+    seconds[0] += REFRESH_INTERVAL_SECONDS
+
+
+def _unreachable(r: httpx.Response) -> str:
+    """Check a refusal for an unreachable provider and return its sentence.
+
+    Parameters
+    ----------
+    r
+        The answer of a start.
+
+    Returns
+    -------
+    str
+        The sentence; it names the provider.
+    """
+    assert r.status_code == 403, r.text
+    assert (r.json()["type"], r.json()["reason"]) == ("OidcSignInRefused", "provider_unreachable")
+    detail = str(r.json()["detail"])
+    assert detail.startswith("idp.example.com can't be reached right now")
+    return detail
+
+
+def test_start_with_a_provider_that_went_down_says_so_instead_of_sending_the_browser(
+    client: TestClient, fake: FakeProvider
+) -> None:
+    """The cached documents are no proof that the provider answers now (#854)."""
+    served = fake.documents[DISCOVERY]
+    _goes_down(client, fake)
+    detail = _unreachable(client.post(START, json={}))
+    assert "passkey" in detail
+    assert [e["reason"] for e in _events(client, AuditEventType.SIGN_IN_OIDC_REFUSED)] == [
+        "provider_unreachable"
+    ]
+    assert _flows(client) == []
+    fake.documents[DISCOVERY] = served
+    cast(FastAPI, client.app).state.oidc_provider = fake.provider()
+    assert client.post(START, json={}).status_code == 200
 
 
 def test_start_reads_at_most_16_kib(client: TestClient) -> None:
@@ -1160,6 +1219,23 @@ def _start_with_link(client: TestClient, purpose: str, public_id: str, secret: s
     )
 
 
+@pytest.mark.parametrize("purpose", ["invite", "recovery"])
+def test_a_link_while_the_provider_is_down_is_kept_and_says_so(
+    client: TestClient, fake: FakeProvider, purpose: str
+) -> None:
+    if purpose == "invite":
+        _, public_id, secret = _invite(client)
+    else:
+        _link(client, "dave")
+        r = client.post("/api/v1/principals/dave/recovery-link", headers=AUTH_HEADER)
+        assert r.status_code == 201, r.text
+        public_id, secret = _halves(r.json()["url"])
+    _goes_down(client, fake)
+    detail = _unreachable(_start_with_link(client, purpose, public_id, secret))
+    assert "link still works" in detail
+    assert _flows(client) == []
+
+
 def test_invite_through_the_provider_signs_in_and_links(
     client: TestClient, fake: FakeProvider, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -1660,3 +1736,19 @@ def test_a_link_without_a_fresh_provider_sign_in_is_refused(
     assert _person(linking, "bob").oidc_subject is None
     reasons = [e["reason"] for e in _events(linking, AuditEventType.SIGN_IN_OIDC_REFUSED)]
     assert reasons == ["auth_too_old", "auth_too_old"]
+
+
+def test_linking_or_confirming_while_the_provider_is_down_says_so(
+    linking: TestClient, fake: FakeProvider, clock: SettableClock
+) -> None:
+    _person_with_passkey(linking, "bob")
+    _goes_down(linking, fake)
+    headers = _in_session(linking, "bob", touched_at=clock.now)
+    detail = _unreachable(linking.post(LINK_START, headers=headers, json={}))
+    assert "not linked" in detail
+    _link(linking, "alice")
+    detail = _unreachable(
+        linking.post(STEP_UP_START, headers=_in_session(linking, "alice"), json={})
+    )
+    assert "not confirmed" in detail
+    assert _flows(linking) == []
