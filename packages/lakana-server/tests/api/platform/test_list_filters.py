@@ -6,6 +6,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -299,21 +300,32 @@ _SORTABLE = {
 """Every list a person can sort by a column, with the fields it sorts by."""
 
 
-def test_every_sortable_list_takes_its_fields_and_refuses_any_other(client: TestClient) -> None:
+@pytest.mark.parametrize(("url", "fields"), list(_SORTABLE.items()), ids=list(_SORTABLE))
+def test_every_sortable_list_takes_its_fields_and_refuses_any_other(
+    client: TestClient, url: str, fields: str
+) -> None:
+    """One list a test, so each stays fast: every field both ways, any other field refused.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    url
+        The list's route.
+    fields
+        The fields it sorts by, as its refusal names them.
+    """
     _deploy(client)
-    for url, fields in _SORTABLE.items():
-        for field in fields.split(", "):
-            for order in ("asc", "desc"):
-                ok = client.get(url, headers=AUTH_HEADER, params={"sort": field, "order": order})
-                assert ok.status_code == 200, (url, field, ok.text)
-        unknown = client.get(url, headers=AUTH_HEADER, params={"sort": "secret_text"})
-        assert unknown.status_code == 422, url
-        assert unknown.json()["detail"] == (
-            f"`sort` must be one of: {fields}; got 'secret_text'."
-        ), url
-        direction = client.get(url, headers=AUTH_HEADER, params={"order": "sideways"})
-        assert direction.status_code == 422, url
-        assert direction.json()["detail"] == "`order` must be asc or desc; got 'sideways'.", url
+    for field in fields.split(", "):
+        for order in ("asc", "desc"):
+            ok = client.get(url, headers=AUTH_HEADER, params={"sort": field, "order": order})
+            assert ok.status_code == 200, (url, field, ok.text)
+    unknown = client.get(url, headers=AUTH_HEADER, params={"sort": "secret_text"})
+    assert unknown.status_code == 422, url
+    assert unknown.json()["detail"] == (f"`sort` must be one of: {fields}; got 'secret_text'."), url
+    direction = client.get(url, headers=AUTH_HEADER, params={"order": "sideways"})
+    assert direction.status_code == 422, url
+    assert direction.json()["detail"] == "`order` must be asc or desc; got 'sideways'.", url
 
 
 def test_runs_sorted_by_a_column_page_with_the_header_cursor(client: TestClient) -> None:
