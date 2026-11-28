@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 
-import { consoleErrors, signInAsAdmin, STUBBED, tabTo, violations } from "./session";
+import { consoleErrors, signInAsAdmin, STUBBED, SUB_PIXEL, tabTo, violations } from "./session";
 
 const KEY = "lakana.preferences";
 const CHOICE = "lakana.catalog.admin";
@@ -176,8 +176,8 @@ for (const theme of ["light", "dark"] as const) {
       const tightest = Math.min(...gaps.map((entry) => entry.gap));
       expect(
         tightest,
-        JSON.stringify(gaps.filter((entry) => entry.gap < 24)),
-      ).toBeGreaterThanOrEqual(24);
+        JSON.stringify(gaps.filter((entry) => entry.gap < 24 - SUB_PIXEL)),
+      ).toBeGreaterThanOrEqual(24 - SUB_PIXEL);
       // The rows hold "1.2M" and "83.9 MB", the widest numbers to sit against their neighbours.
       await expect(page.getByText("1.2M")).toBeVisible();
       await expect(page.getByText("83.9 MB")).toBeVisible();

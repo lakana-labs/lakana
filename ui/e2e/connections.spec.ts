@@ -140,9 +140,8 @@ for (const theme of ["light", "dark"] as const) {
       );
     });
 
-    test("axe finds nothing on the list, a page, Add with each kind, Edit, and each dialog, and at 320 px", async ({
-      page,
-    }) => {
+    // Four tests, not one: all of these axe runs in one test outgrew its 30 s in WebKit.
+    test("axe finds nothing on the list and a page", async ({ page }) => {
       await stubConnections(page);
       await openList(page);
       expect(await violations(page), "the list").toEqual([]);
@@ -153,7 +152,10 @@ for (const theme of ["light", "dark"] as const) {
 
       await openConnection(page, PROD, WAREHOUSE);
       expect(await violations(page), "a reader's page").toEqual([]);
+    });
 
+    test("axe finds nothing on Add with each kind and on Edit", async ({ page }) => {
+      await stubConnections(page);
       await openAdd(page);
       for (const kind of KINDS) {
         await chooseKind(page, kind);
@@ -163,7 +165,10 @@ for (const theme of ["light", "dark"] as const) {
       await openConnection(page, DEV, EXPORTS, "/edit");
       await expect(page.getByRole("button", { name: "Save" })).toBeVisible();
       expect(await violations(page), "Edit").toEqual([]);
+    });
 
+    test("axe finds nothing in each dialog", async ({ page }) => {
+      await stubConnections(page);
       await openConnection(page, DEV, EXPORTS);
       await page.getByRole("button", { name: "Delete…" }).click();
       const inUse = page.getByRole("dialog", { name: `${EXPORTS} is still in use` });
@@ -181,7 +186,10 @@ for (const theme of ["light", "dark"] as const) {
       expect(await violations(page), "the Delete dialog").toEqual([]);
       await remove.getByRole("button", { name: "Cancel" }).click();
       await expect(remove).toBeHidden();
+    });
 
+    test("axe finds nothing at 320 px", async ({ page }) => {
+      await stubConnections(page);
       await page.setViewportSize({ width: 320, height: 640 });
       await openList(page);
       expect(await violations(page), "the list at 320 px").toEqual([]);

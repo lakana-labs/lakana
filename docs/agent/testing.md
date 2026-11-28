@@ -1416,7 +1416,16 @@ five).
   makes ARIA element reflection (`ariaLabelledByElements` and the other `aria*Elements`) answer
   null, so axe reads the attributes: Playwright's Firefox 159 crashes the page ("Page crashed") when
   axe 4.14 reads `ariaLabelledByElements` of an element React rendered (#700). Remove it once a
-  Firefox update reads the property without crashing. `e2e:server` runs the sign-in,
+  Firefox update reads the property without crashing. The suite has to pass in all three
+  browsers, not only in the Chromium a pull request runs: `tabTo` (`ui/e2e/session.ts`) goes back
+  with Shift+Tab when Tab does not reach an element (Firefox wraps Tab to `<body>` and goes on
+  part-way down the page); a measured length is compared within `SUB_PIXEL` (0.02 px, as Firefox
+  and WebKit report 24 px as 23.99998 and cut to 1/64 px); `consoleErrors` leaves out only the two
+  errors of a load that a navigation cut off (WebKit's same-origin "Fetch API cannot load … due to
+  access control checks", Firefox's font download with status 2152398850); the stubbed identity
+  provider answers with a page that calls `location.replace`, as WebKit cannot fulfil a stubbed
+  303; and a WebKit test has 60 s instead of 30, as its axe checks run two to three times as
+  slowly. `e2e:server` runs the sign-in,
   Home, Catalog, table page, Queries and profile picture tests against a real `lakana-server` instead (Chromium per pull
   request, Firefox and WebKit nightly); its tests share one server and one database and run one
   at a time, every person and environment they create has a unique name, and each test sets the state it needs

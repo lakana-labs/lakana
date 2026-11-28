@@ -1019,7 +1019,50 @@ export async function violations(page: Page): Promise<string[]> {
 }
 
 /**
- * Collects the console errors and page errors of a page.
+ * How far a measured length may miss a whole pixel and still count as it, in CSS pixels.
+ *
+ * Firefox and WebKit can report a length a little off the one asked for, where Chromium gives
+ * the exact number: Firefox a 24 px gap as 23.99998 and a 20 px height as 20.00002, WebKit a
+ * drawing 1319.7765 px wide as 1319.7656, as it cuts a length down to its layout unit of 1/64 px
+ * (0.0156). The tolerance is a little above that unit. A real layout fault is off by a pixel or
+ * more, so it hides none.
+ */
+export const SUB_PIXEL = 0.02;
+
+/** The hosts the suite's preview server answers on (playwright.config.ts). */
+const OWN_HOST = String.raw`(?:127\.0\.0\.1|localhost):4173/`;
+
+/**
+ * The errors a browser reports for one of the page's own loads that a navigation cut off.
+ *
+ * Neither is a fault the suite looks for: WebKit rejects a fetch of the page's own origin that a
+ * navigation cancels with "Fetch API cannot load … due to access control checks" (a same-origin
+ * request has none to fail), and the rejection reaches the page as an uncaught error; Firefox
+ * logs a font download a navigation cancels with status 2152398850 (0x804B0002,
+ * NS_BINDING_ABORTED). Both match only the page's own origin and that exact wording, so a CORS
+ * refusal of another origin, a missing font (404) or any other error still counts.
+ */
+const ABORTED_BY_NAVIGATION: readonly RegExp[] = [
+  new RegExp(
+    String.raw`^Fetch API cannot load http://${OWN_HOST}\S* due to access control checks\.$`,
+  ),
+  new RegExp(
+    String.raw`downloadable font: download failed \(.*\): status=2152398850 source: http://${OWN_HOST}assets/`,
+  ),
+];
+
+/**
+ * Tells whether an error is a load a navigation cut off (`ABORTED_BY_NAVIGATION`).
+ *
+ * @param text - A console message, or an uncaught error's first line.
+ * @returns Whether to leave it out.
+ */
+function abortedByNavigation(text: string): boolean {
+  return ABORTED_BY_NAVIGATION.some((aborted) => aborted.test(text));
+}
+
+/**
+ * Collects the console errors and page errors of a page, without the loads a navigation cut off.
  *
  * @param page - The page to listen to.
  * @returns The list, filled as errors arrive.
@@ -1027,27 +1070,42 @@ export async function violations(page: Page): Promise<string[]> {
 export function consoleErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on("console", (message) => {
-    if (message.type() === "error") {
-      errors.push(message.text());
+    const text = message.text();
+    if (message.type() === "error" && !abortedByNavigation(text)) {
+      errors.push(text);
     }
   });
-  page.on("pageerror", (error) => errors.push(error.message));
+  // Playwright splits WebKit's message at its first colon ("Fetch API cannot load http" as the
+  // name, "/localhost:4173/… due to access control checks." as the message); the stack's first
+  // line holds it whole.
+  page.on("pageerror", (error) => {
+    if (!abortedByNavigation(error.stack?.split("\n")[0] ?? "")) {
+      errors.push(error.message);
+    }
+  });
   return errors;
 }
 
 /**
- * Moves the focus with Tab until it reaches the element.
+ * Moves the focus with Tab until it reaches the element, or with Shift+Tab when Tab does not.
+ *
+ * Tab past the last element wraps to the first in Chromium and WebKit, so going forwards reaches
+ * every element. Firefox wraps to `<body>`, and its next Tab need not start at the top: the
+ * diagnosis of 0.23.0 saw it go on at the main area's first field, so the elements before that
+ * were never reached forwards. Going backwards from there reaches them.
  *
  * @param page - The page.
  * @param target - The element.
  */
 export async function tabTo(page: Page, target: Locator): Promise<void> {
   // Enough to come round the page once: Settings lists sixteen places beside the sidebar.
-  for (let step = 0; step < 60; step += 1) {
-    if (await target.evaluate((node) => node === document.activeElement)) {
-      return;
+  for (const key of ["Tab", "Shift+Tab"]) {
+    for (let step = 0; step < 60; step += 1) {
+      if (await target.evaluate((node) => node === document.activeElement)) {
+        return;
+      }
+      await page.keyboard.press(key);
     }
-    await page.keyboard.press("Tab");
   }
-  throw new Error("Tab never reached the element");
+  throw new Error("Neither Tab nor Shift+Tab reached the element");
 }

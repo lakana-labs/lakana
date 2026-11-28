@@ -12,7 +12,10 @@ export default defineConfig({
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
     { name: "firefox", use: { ...devices["Desktop Firefox"] } },
-    { name: "webkit", use: { ...devices["Desktop Safari"] } },
+    // WebKit runs the suite's axe checks two to three times as slowly as Firefox: at 0.23.0 a dozen
+    // tests took 20 to 29 s of the default 30 there, and under load some crossed it. A test that
+    // hangs still fails, after 60 s.
+    { name: "webkit", use: { ...devices["Desktop Safari"] }, timeout: 60_000 },
   ],
   // The production build, served with the content security policy (vite.config.ts).
   webServer: { command: "npm run preview -- --port 4173 --strictPort", url: URL },
