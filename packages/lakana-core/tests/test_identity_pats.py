@@ -5,7 +5,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -894,3 +894,58 @@ def test_unlinked_person_has_no_window(session: Session) -> None:
     alice.last_provider_sign_in_at = datetime(2026, 11, 1, tzinfo=UTC)
     session.commit()
     assert token_window_ends_at(session, alice) == datetime(2026, 12, 1, tzinfo=UTC)
+
+
+def test_list_all_sorts_by_every_column_a_missing_time_last(session: Session) -> None:
+    """Owner and name from A; last used latest first; expiry soonest first; never last."""
+    ada = _person(session, "ada", admin=True)
+    bob = _person(session, "bob")
+    cy = _person(session, "cy")
+    now = datetime.now(UTC)
+    a = _stamp(session, ada, "zeta", minutes_ago=50, last_used_at=now - timedelta(minutes=5))
+    b = _stamp(session, bob, "Alpha", minutes_ago=20, expires_at=now + timedelta(days=2))
+    c = _stamp(
+        session,
+        cy,
+        "mid",
+        minutes_ago=10,
+        last_used_at=now - timedelta(minutes=1),
+        expires_at=now + timedelta(days=1),
+    )
+    session.execute(
+        update(PersonalAccessToken).where(PersonalAccessToken.key_id == b).values(last_used_at=None)
+    )
+    session.commit()
+    service = PatService(session, _auditing(session))
+
+    def walk(**sort: str) -> list[str]:
+        """Read every live token one a page.
+
+        Parameters
+        ----------
+        **sort
+            `sort` and `order`.
+
+        Returns
+        -------
+        list of str
+            The key ids in the order the pages gave them.
+        """
+        seen: list[str] = []
+        cursor: str | None = None
+        while True:
+            page = service.list_all(ada, limit=1, cursor=cursor, **sort)
+            seen.extend(listed.token.key_id for listed in page.items)
+            if page.next_cursor is None:
+                return seen
+            cursor = page.next_cursor
+
+    assert walk(sort="owner") == [a, b, c]
+    assert walk(sort="name") == [b, c, a]
+    assert walk(sort="last_used") == [c, a, b]
+    assert walk(sort="last_used", order="asc") == [a, c, b]
+    assert walk(sort="expires") == [c, b, a]
+    assert walk(sort="expires", order="desc") == [b, c, a]
+    assert walk(sort="created", order="asc") == [a, b, c]
+    with pytest.raises(ValidationError, match="`sort` must be one of: created, expires, last_used"):
+        service.list_all(ada, sort="secret")

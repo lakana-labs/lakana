@@ -926,3 +926,62 @@ def test_list_live_hides_a_token_whose_personal_tokens_owner_is_deactivated(
     session.commit()
 
     assert child.key_id not in {i.token.key_id for i in service.list_live(lister).items}
+
+
+def test_list_live_sorts_by_every_column_one_a_page(session: Session, tmp_path: Path) -> None:
+    """Environment, purpose, principal and expiry; a token minted by hand has no purpose."""
+    admin = _administrator(session)
+    _prepared_catalog(
+        session,
+        tmp_path,
+        AllowAllAuthorization(),
+        namespaces=[NamespacePath.from_parts(["bronze"])],
+        tables=[],
+    )
+    _add_principal(session, "worker-1")
+    _add_principal(session, "Alpha")
+    minting = TaskTokenService(session, AllowAllAuthorization())
+    by_hand = minting.mint(admin, "worker-1", environment="dev", asset_scope=[], ttl_seconds=3600)
+    other = minting.mint(admin, "Alpha", environment="prod", asset_scope=[], ttl_seconds=3600)
+    task = python_task_run(session, admin.id, asset="gold.scores", claim=2)
+    bound = minting.mint_for_task(task.id, 2, ttl_seconds=3600)
+    now = datetime.now(UTC)
+    _stamped(session, by_hand.key_id, minutes_ago=30, expires_at=now + timedelta(minutes=50))
+    _stamped(session, other.key_id, minutes_ago=10, expires_at=now + timedelta(minutes=10))
+    _stamped(session, bound.key_id, minutes_ago=5, expires_at=now + timedelta(minutes=30))
+    t1, t3, t2 = by_hand.key_id, other.key_id, bound.key_id
+    service = _listing_service(session)
+
+    def walk(**sort: str) -> list[str]:
+        """Read every live token one a page.
+
+        Parameters
+        ----------
+        **sort
+            `sort` and `order`.
+
+        Returns
+        -------
+        list of str
+            The key ids in the order the pages gave them.
+        """
+        seen: list[str] = []
+        cursor: str | None = None
+        while True:
+            page = service.list_live(admin, limit=1, cursor=cursor, **sort)
+            seen.extend(item.token.key_id for item in page.items)
+            if page.next_cursor is None:
+                return seen
+            cursor = page.next_cursor
+
+    assert walk() == [t2, t3, t1]
+    assert walk(sort="environment") == [t2, t1, t3]
+    assert walk(sort="environment", order="desc") == [t3, t2, t1]
+    assert walk(sort="purpose") == [t2, t3, t1]
+    assert walk(sort="purpose", order="desc") == [t2, t3, t1]
+    names = {t1: "worker-1", t3: "alpha", t2: admin.name.lower()}
+    assert walk(sort="principal") == sorted(names, key=lambda key: names[key])
+    assert walk(sort="expires") == [t3, t2, t1]
+    assert walk(sort="issued", order="asc") == [t1, t3, t2]
+    with pytest.raises(ValidationError, match="`sort` must be one of: environment, expires"):
+        service.list_live(admin, sort="scope")

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-from sqlalchemy import and_, func, or_, select, text, update
+from sqlalchemy import Select, String, and_, false, func, or_, select, text, type_coerce, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -46,7 +46,18 @@ from lakana_core.models import (
     TaskRun,
     WriteMode,
 )
-from lakana_core.pagination import Position, decode_cursor, encode_cursor, parse_choices
+from lakana_core.pagination import (
+    ListSort,
+    Position,
+    SortKey,
+    decode_cursor,
+    encode_cursor,
+    encode_sorted_cursor,
+    keyset_sorted,
+    parse_choices,
+    parse_sort,
+    read_sorted_position,
+)
 from lakana_core.runs import pools
 from lakana_core.runs.lockdown import (
     ProtectedWriteGuard,
@@ -163,6 +174,33 @@ SINCE_WITHOUT_ZONE = (
 """Why a query list refuses a `since` without a time zone."""
 
 
+QUERY_SORTS: dict[str, bool] = {"created": True, "status": False}
+"""The fields a query list sorts by instead of its own order (running, queued, then ended): when
+the query was submitted, the newest first, or its state from A, one state's newest first."""
+
+
+def _query_sort_keys(field: str) -> tuple[SortKey, ...]:
+    """Give the keys a query list is sorted by in a field.
+
+    Parameters
+    ----------
+    field
+        A key of `QUERY_SORTS`.
+
+    Returns
+    -------
+    tuple of SortKey
+        ``created``: the time submitted. ``status``: the state as stored, then the newest
+        first.
+    """
+    if field == "created":
+        return (SortKey(QueryRun.created_at, datetime),)
+    return (
+        SortKey(type_coerce(QueryRun.status, String), str),
+        SortKey(QueryRun.created_at, datetime, descending=True),
+    )
+
+
 @dataclass(frozen=True)
 class _ListFilters:
     """The parsed filters of a query list, with its page's size and position.
@@ -184,7 +222,11 @@ class _ListFilters:
     limit
         The page size.
     position
-        Where the previous page ended, or `None` for the first page.
+        Where the previous page ended, or `None` for the first page; in the list's own order.
+    sort
+        The sort the list is read in; `None` for its own order.
+    cursor
+        The `next_cursor` of the previous page as sent, read in `sort` by `_read_sorted`.
     """
 
     kind: str
@@ -195,6 +237,8 @@ class _ListFilters:
     since: datetime | None
     limit: int
     position: Position | None
+    sort: ListSort | None = None
+    cursor: str | None = None
 
     @classmethod
     def parse(
@@ -208,6 +252,8 @@ class _ListFilters:
         since: datetime | None,
         limit: int,
         cursor: str | None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> _ListFilters:
         """Check and parse the filters of a query list.
 
@@ -229,6 +275,11 @@ class _ListFilters:
             The page size.
         cursor
             The `next_cursor` of the previous page.
+        sort
+            The field the list is sorted by (`QUERY_SORTS`); with `order` also `None`, the
+            list's own order.
+        order
+            ``asc`` or ``desc``; the field's own direction without it.
 
         Returns
         -------
@@ -239,7 +290,8 @@ class _ListFilters:
         ------
         ValidationError
             If `limit` is outside 1 to 200, a status or an origin is unknown, `since` has no
-            time zone, or `cursor` is not one this server issued for the list `kind`.
+            time zone, `sort` or `order` is unknown, or `cursor` is not one this server issued
+            for the list `kind` in its own order (a sorted cursor is read later).
         """
         if not 1 <= limit <= QUERY_LIST_MAX:
             raise ValidationError(f"limit must be between 1 and {QUERY_LIST_MAX}, not {limit}.")
@@ -247,6 +299,11 @@ class _ListFilters:
         origins = parse_choices("origin", origin, QueryOrigin)
         if since is not None and since.tzinfo is None:
             raise ValidationError(SINCE_WITHOUT_ZONE)
+        chosen = (
+            None
+            if sort is None and order is None
+            else parse_sort(sort, order, QUERY_SORTS, "created")
+        )
         return cls(
             kind=kind,
             # A `since` asks for the runs that ended since then; it never does nothing.
@@ -256,8 +313,40 @@ class _ListFilters:
             submitter=submitter,
             since=None if since is None else since.astimezone(UTC),
             limit=limit,
-            position=None if cursor is None else decode_cursor(kind, cursor),
+            position=None if cursor is None or chosen is not None else decode_cursor(kind, cursor),
+            sort=chosen,
+            cursor=cursor,
         )
+
+
+def _listed_columns() -> Select[*tuple[Any, ...]]:
+    """Start the select of a query list's rows: their columns, never the SQL.
+
+    Returns
+    -------
+    Select
+        The columns of `QueryRun` a list shows, its environment's name and its submitter's.
+    """
+    return (
+        select(
+            QueryRun.id,
+            QueryRun.environment_id,
+            Environment.name.label("environment"),
+            QueryRun.origin,
+            Principal.name,
+            QueryRun.write_mode,
+            QueryRun.target_name,
+            QueryRun.status,
+            QueryRun.created_at,
+            QueryRun.started_at,
+            QueryRun.finished_at,
+            QueryRun.error_cause,
+            QueryRun.principal_id,
+            QueryRun.task_run_id,
+        )
+        .join(Environment, Environment.id == QueryRun.environment_id)
+        .outerjoin(Principal, Principal.id == QueryRun.principal_id)
+    )
 
 
 def _own_runs(p: PrincipalRef) -> list[Any]:
@@ -668,6 +757,8 @@ class QueryService:
         since: datetime | None = None,
         limit: int = 100,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> tuple[list[QueryListItem], str | None]:
         """List the queries of an environment, one page at a time: running, queued, then ended.
 
@@ -733,6 +824,11 @@ class QueryService:
             Most rows returned (1 to 200).
         cursor
             The `next_cursor` of the previous page. Send the same filters with every page.
+        sort
+            ``created`` (when submitted) or ``status``, in one order across the parts; with
+            `order` also `None`, the list's own order.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for ``status``.
 
         Returns
         -------
@@ -765,6 +861,8 @@ class QueryService:
             since=since,
             limit=limit,
             cursor=cursor,
+            sort=sort,
+            order=order,
         )
         visible = [QueryRun.environment_id == env.id]
         if not manager:
@@ -789,6 +887,8 @@ class QueryService:
         since: datetime | None = None,
         limit: int = 100,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> tuple[list[QueryListItem], str | None]:
         # jscpd:ignore-end
         """List the queries of every environment the caller may query, one page at a time.
@@ -828,6 +928,11 @@ class QueryService:
             Most rows returned (1 to 200).
         cursor
             The `next_cursor` of the previous page. Send the same filters with every page.
+        sort
+            ``created`` (when submitted) or ``status``, in one order across the parts; with
+            `order` also `None`, the list's own order.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for ``status``.
 
         Returns
         -------
@@ -857,6 +962,8 @@ class QueryService:
                 since=since,
                 limit=limit,
                 cursor=cursor,
+                sort=sort,
+                order=order,
             )
         filters = _ListFilters.parse(
             "all-queries",
@@ -867,6 +974,8 @@ class QueryService:
             since=since,
             limit=limit,
             cursor=cursor,
+            sort=sort,
+            order=order,
         )
         managed, own_only = self._queryable_environments(p)
         shown = []
@@ -999,6 +1108,11 @@ class QueryService:
         if wanted_final or (filters.include_ended and not statuses):
             ended = QueryRun.status.in_(wanted_final or final) & (QueryRun.finished_at >= cutoff)
             parts.append((_ENDED, ended, QueryRun.finished_at, False))
+        if filters.sort is not None:
+            rows, next_cursor = self._read_sorted(
+                filters, filters.sort, conditions, [c for _, c, _, _ in parts]
+            )
+            return rows, next_cursor, now
         limit, position = filters.limit, filters.position
         found: list[tuple[int, Any]] = []
         for part, condition, when, oldest_first in parts:
@@ -1017,24 +1131,7 @@ class QueryService:
             found += [
                 (part, row)
                 for row in self._session.execute(
-                    select(
-                        QueryRun.id,
-                        QueryRun.environment_id,
-                        Environment.name.label("environment"),
-                        QueryRun.origin,
-                        Principal.name,
-                        QueryRun.write_mode,
-                        QueryRun.target_name,
-                        QueryRun.status,
-                        QueryRun.created_at,
-                        QueryRun.started_at,
-                        QueryRun.finished_at,
-                        QueryRun.error_cause,
-                        QueryRun.principal_id,
-                        QueryRun.task_run_id,
-                    )
-                    .join(Environment, Environment.id == QueryRun.environment_id)
-                    .outerjoin(Principal, Principal.id == QueryRun.principal_id)
+                    _listed_columns()
                     .where(*conditions, condition, *after)
                     .order_by(when if oldest_first else when.desc(), QueryRun.id)
                     .limit(limit + 1 - len(found))
@@ -1051,6 +1148,56 @@ class QueryService:
             }[part]
             next_cursor = encode_cursor(filters.kind, moment, last.id, part)
         return [row for _, row in page], next_cursor, now
+
+    def _read_sorted(
+        self,
+        filters: _ListFilters,
+        sort: ListSort,
+        conditions: Sequence[Any],
+        parts: Sequence[Any],
+    ) -> tuple[list[Any], str | None]:
+        """Read one page of a query list in a sort of the caller's choice, in one statement.
+
+        The rows are those of the list's own order (every part's condition, the same visible
+        rows and filters); only their sequence differs.
+
+        Parameters
+        ----------
+        filters
+            The parsed filters, with the cursor as sent.
+        sort
+            The sort.
+        conditions
+            The conditions that keep the rows the caller may see, and the filters.
+        parts
+            The condition of each part of the list's own order that is listed.
+
+        Returns
+        -------
+        tuple of (list, str or None)
+            The page's rows and the cursor of the next page, or `None` on the last.
+
+        Raises
+        ------
+        ValidationError
+            If the cursor is not one this server issued for this list in this sort.
+        """
+        keys = _query_sort_keys(sort.field)
+        at = (
+            None
+            if filters.cursor is None
+            else read_sorted_position(filters.kind, sort, filters.cursor, keys)
+        )
+        query = _listed_columns().where(*conditions, or_(false(), *parts))
+        ordered = keyset_sorted(query, keys, QueryRun.id, sort.descending, at)
+        rows = list(self._session.execute(ordered.limit(filters.limit + 1)).all())
+        page = rows[: filters.limit]
+        next_cursor = None
+        if len(rows) > filters.limit:
+            last = page[-1]
+            width = len(last) - len(keys) - 1
+            next_cursor = encode_sorted_cursor(filters.kind, sort.name, last[width:-1], last[-1])
+        return page, next_cursor
 
     def _list_items(
         self, rows: Sequence[Any], now: datetime, p: PrincipalRef

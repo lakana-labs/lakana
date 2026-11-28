@@ -268,11 +268,12 @@ def list_runs(
         The `X-Next-Cursor` of the previous page.
     sort
         What the list is sorted by: `created` (the default), `name` (the job's, else the
-        repository's, in any letter case) or `status`; runs of one name or state come newest
-        first.
+        repository's, in any letter case), `status`, `environment`, `trigger` (a run started
+        with `lakana run`, which has none, last), `duration` (to now for one still going; one
+        not started last) or `tasks` (how many); runs of one value come newest first.
     order
-        `asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the
-        others.
+        `asc` or `desc`; by default `desc` for `created` (the newest first), `duration` (the
+        longest first) and `tasks` (the most first), `asc` for the others.
     principal
         The authenticated caller.
     service

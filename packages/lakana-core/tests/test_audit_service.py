@@ -7,7 +7,7 @@ from typing import Any, cast
 import pytest
 from sqlalchemy.orm import Session
 
-from lakana_core.audit.service import AuditCursor, AuditService
+from lakana_core.audit.service import AuditCursor, AuditService, audit_cursor_types
 from lakana_core.auth import (
     Action,
     AllowAllAuthorization,
@@ -424,5 +424,80 @@ def test_query_refuses_a_cursor_of_the_other_order_and_an_unknown_sort(session: 
         match="sorted by `occurred:asc`: it came from the list sorted by `occurred:desc`",
     ):
         service.query(admin, cursor=newest, order="asc")
-    with pytest.raises(ValidationError, match="`sort` must be one of: occurred; got 'principal'"):
-        service.query(admin, sort="principal")
+    with pytest.raises(
+        ValidationError, match="`sort` must be one of: event, occurred, on, who; got 'detail'"
+    ):
+        service.query(admin, sort="detail")
+
+
+def test_query_sorts_by_event_who_and_on_one_a_page(session: Session) -> None:
+    """Each sort pages every event once; the events of one value come newest first."""
+    admin = _add_principal(session, "admin")
+    bob = _add_principal(session, "Bob")
+    service = AuditService(session, AllowAllAuthorization())
+    start = datetime.now(UTC) - timedelta(hours=1)
+    made = [
+        (admin.id, AuditEventType.GRANT_CREATED, Securable.environment_scope("prod")),
+        (bob.id, AuditEventType.AUTHENTICATION_SUCCEEDED, None),
+        (None, AuditEventType.AUTHENTICATION_FAILED, Securable.environment_scope("dev")),
+        (admin.id, AuditEventType.AUTHENTICATION_SUCCEEDED, Securable.environment_scope("dev")),
+    ]
+    ids = []
+    for minute, (who, event_type, securable) in enumerate(made):
+        event = service.record(who, event_type, securable=securable, commit=True)
+        event.occurred_at = start + timedelta(minutes=minute)
+        ids.append(event.id)
+    session.commit()
+    e0, e1, e2, e3 = ids
+
+    def walk(**sort: str) -> list[uuid.UUID]:
+        """Read every event one a page.
+
+        Parameters
+        ----------
+        **sort
+            `sort` and `order`.
+
+        Returns
+        -------
+        list of uuid.UUID
+            The ids in the order the pages gave them, the record of each read left out.
+        """
+        seen: list[uuid.UUID] = []
+        cursor: AuditCursor | None = None
+        while True:
+            page = service.query(
+                admin,
+                limit=1,
+                cursor=cursor,
+                event_type=None,
+                until=start + timedelta(minutes=30),
+                **sort,
+            )
+            seen.extend(e.id for e in page.items)
+            if page.next_cursor is None:
+                return seen
+            cursor = page.next_cursor
+            assert cursor.sort.startswith(sort["sort"])
+
+    assert walk(sort="who") == [e3, e0, e1, e2]
+    assert walk(sort="who", order="desc") == [e1, e3, e0, e2]
+    assert walk(sort="event") == [e2, e3, e1, e0]
+    assert walk(sort="on") == [e1, e3, e2, e0]
+    by_who = service.query(admin, limit=1, sort="who").next_cursor
+    with pytest.raises(ValidationError, match="it came from the list sorted by `who:asc`"):
+        service.query(admin, cursor=by_who, sort="on")
+    with pytest.raises(ValidationError, match="The cursor is not valid"):
+        service.query(admin, cursor=AuditCursor(start, e0, "on:asc", ("x",)), sort="on")
+
+
+@pytest.mark.parametrize(("sort", "count"), [("event:asc", 2), ("who:desc", 2), ("on:asc", 4)])
+def test_a_sorted_audit_cursor_holds_the_fields_keys_and_a_time(sort: str, count: int) -> None:
+    types = audit_cursor_types(sort)
+    assert len(types) == count and types[-1] is datetime
+
+
+@pytest.mark.parametrize("sort", ["occurred:desc", "secret:asc", ""])
+def test_a_cursor_of_no_sorted_field_has_no_key_types(sort: str) -> None:
+    with pytest.raises(ValidationError, match="The cursor is not valid"):
+        audit_cursor_types(sort)

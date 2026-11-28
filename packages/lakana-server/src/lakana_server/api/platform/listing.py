@@ -13,6 +13,7 @@ from fastapi import Query, Response
 from lakana_core.pagination import (
     CURSOR_MAX_LENGTH,
     NAMESPACE_CURSOR_MAX_LENGTH,
+    PLACE_CURSOR_MAX_LENGTH,
     TABLE_CURSOR_MAX_LENGTH,
 )
 
@@ -67,3 +68,7 @@ NamespaceCursorParam = Annotated[str | None, Query(max_length=NAMESPACE_CURSOR_M
 
 TableCursorParam = Annotated[str | None, Query(max_length=TABLE_CURSOR_MAX_LENGTH)]
 """The `cursor` of a list of tables, artifacts or orphans: as long as the longest one it issues."""
+
+PlaceCursorParam = Annotated[str | None, Query(max_length=PLACE_CURSOR_MAX_LENGTH)]
+"""The `cursor` of a list that sorts by place (grants, policies, the audit log): as long as the
+cursor of the longest environment, namespace and table names."""

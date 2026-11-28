@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import exists, or_, select, update
+from sqlalchemy import ColumnElement, String, cast, exists, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -34,7 +34,7 @@ from lakana_core.grants.break_glass import LAST_UNLINKED_ADMIN_MESSAGE, breaks
 from lakana_core.grants.explain import PermissionReport, explain_permissions, grant_scope
 from lakana_core.grants.roles import ROLE_ACTIONS, Role
 from lakana_core.identifiers import NamespacePath
-from lakana_core.identity.named import group_named, principal_named
+from lakana_core.identity.named import group_named, principal_named, subject_place_sorts
 from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
@@ -46,13 +46,24 @@ from lakana_core.models import (
     Principal,
     SignInLink,
 )
-from lakana_core.pagination import Page, newest_first
+from lakana_core.pagination import (
+    Page,
+    SortField,
+    SortKey,
+    name_order,
+    newest_or_sorted,
+    parse_sort,
+)
 
 LAST_ADMIN_MESSAGE = (
     "This would leave the instance without an active administrator. Give another person the "
     "ADMIN role on the instance first, then try again."
 )
 """The refusal of a change that would leave no active administrator, with its next step."""
+
+GRANT_SORTS: dict[str, bool] = {"granted": True, "who": False, "what": False, "on": False}
+"""The fields the grants list sorts by, each with whether it runs from the largest down by
+default: the newest first; whom, what and where from A."""
 
 _EXPECTED_FIELDS: dict[SecurableKind, frozenset[str]] = {
     SecurableKind.INSTANCE: frozenset(),
@@ -488,6 +499,8 @@ class GrantService:
         kind: SecurableKind | None = None,
         limit: int = 100,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> Page[Grant]:
         """List active grants, newest first, one page at a time; every filter is optional.
 
@@ -516,20 +529,28 @@ class GrantService:
         limit
             Most grants returned.
         cursor
-            The `next_cursor` of the previous page. Send the same filters with every page.
+            The `next_cursor` of the previous page. Send the same filters and sort with every
+            page.
+        sort
+            What the list is sorted by: ``granted`` (the default), ``who`` (the principal's or
+            group's name), ``what`` (the role or action) or ``on`` (the environment, then the
+            namespace, then the table; a grant on the whole instance first); the grants of one
+            value newest first.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``granted``, ``asc`` for the others.
 
         Returns
         -------
         Page of Grant
-            The grants by time granted, newest first, equal times by id, and the cursor of the
-            next page.
+            The grants by time granted, newest first, equal times by id (or in the sort asked
+            for), and the cursor of the next page.
 
         Raises
         ------
         ValidationError
             If both `principal_name` and `group_name` are given, both `role` and `action`,
-            `kind` is not `scope`'s kind, `limit` is below 1, or `cursor` is not one this
-            server issued for the grants list.
+            `kind` is not `scope`'s kind, `limit` is below 1, `sort` or `order` is unknown, or
+            `cursor` is not one this server issued for the grants list in this sort.
         NotFoundError
             If no principal has `principal_name`, or no group has `group_name`.
         PermissionDenied
@@ -537,6 +558,7 @@ class GrantService:
             (`MANAGE_GRANT` works only with it).
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GRANT)
+        chosen = parse_sort(sort, order, GRANT_SORTS, "granted")
         if principal_name is not None and group_name is not None:
             raise ValidationError(
                 "Pass at most one of `principal_name` and `group_name`: a grant is made to a "
@@ -572,13 +594,30 @@ class GrantService:
             )
         if kind is not None:
             query = query.where(Grant.kind == kind)
-        return newest_first(
+        fields = subject_place_sorts(
+            self._session,
+            newest="granted",
+            at=Grant.granted_at,
+            principal_id=Grant.principal_id,
+            group_id=Grant.group_id,
+            place=(Grant.environment, Grant.namespace, Grant.table),
+        )
+        what: ColumnElement[str] = func.coalesce(
+            cast(Grant.role, String), cast(Grant.action, String), type_=String
+        )
+        fields["what"] = SortField(
+            (SortKey(name_order(self._session, what), str), fields["who"].keys[1]),
+            descending=False,
+        )
+        return newest_or_sorted(
             self._session,
             query,
             kind="grants",
+            sort=chosen,
+            fields=fields,
+            newest="granted",
             at=Grant.granted_at,
             row_id=Grant.id,
-            at_of=lambda grant: grant.granted_at,
             limit=limit,
             cursor=cursor,
         )

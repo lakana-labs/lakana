@@ -19,7 +19,12 @@ from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService, scope_filter
 from lakana_core.models import Grant
 from lakana_core.pagination import parse_choices
-from lakana_server.api.platform.listing import set_next_cursor
+from lakana_server.api.platform.listing import (
+    OrderParam,
+    PlaceCursorParam,
+    SortParam,
+    set_next_cursor,
+)
 from lakana_server.api.platform.namespace_forms import dotted_namespace, joined_namespace
 from lakana_server.api.platform.schemas import (
     GrantCreate,
@@ -153,24 +158,27 @@ def list_grants(
     table: str | None = Query(default=None, max_length=255),
     kind: str | None = Query(default=None, max_length=32),
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: PlaceCursorParam = None,
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     service: GrantService = Depends(get_grant_service),
     session: Session = Depends(get_session),
 ) -> list[GrantOut]:
     """List grants.
 
-    Lists the active grants, newest first. Every filter is optional and narrows the list,
-    except that `principal_name` and `group_name` exclude each other, and so do `role` and
-    `action` (422 when both are given). The object filter matches exactly: `table` with
-    `namespace` and `environment` lists the grants on that table, `namespace` with
-    `environment` those on the namespace, `environment` alone those on the environment.
-    `kind` lists the grants on every object of one kind, in any letter case: `INSTANCE`
-    those on the whole instance, which apply to everything in it; with an object filter it
-    must be that object's kind (422 otherwise).
-    Needs the `ADMIN` role on the instance.
-    Answers 404 when no principal or group has the name given. The cursor of the next page
-    is in the `X-Next-Cursor` response header.
+    Lists the active grants, newest first, or in the order `sort` and `order` ask for. Every
+    filter is optional and narrows the list, except that `principal_name` and `group_name`
+    exclude each other, and so do `role` and `action` (422 when both are given). The object
+    filter matches exactly: `table` with `namespace` and `environment` lists the grants on that
+    table, `namespace` with `environment` those on the namespace, `environment` alone those on
+    the environment. `kind` lists the grants on every object of one kind, in any letter case:
+    `INSTANCE` those on the whole instance, which apply to everything in it; with an object
+    filter it must be that object's kind (422 otherwise). Needs the `ADMIN` role on the
+    instance. Answers 404 when no principal or group has the name given. The cursor of the next
+    page is in the `X-Next-Cursor` response header. Answers 422 for an unknown `sort` or
+    `order`, or a cursor this list did not issue in this order; send the same sort with every
+    page.
 
     Parameters
     ----------
@@ -197,6 +205,10 @@ def list_grants(
         Most grants returned (1 to 200).
     cursor
         The `X-Next-Cursor` of the previous page; send the same filters.
+    sort
+        What the list is sorted by: `granted` (the default), `who`, `what` or `on`.
+    order
+        `asc` or `desc`; by default `desc` for `granted`, `asc` for the others.
     principal
         The authenticated caller.
     service
@@ -222,6 +234,8 @@ def list_grants(
         kind=kinds[0] if kinds else None,
         limit=limit,
         cursor=cursor,
+        sort=sort,
+        order=order,
     )
     set_next_cursor(response, page.next_cursor)
     names = subject_names(session, page.items)

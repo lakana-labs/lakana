@@ -6,9 +6,9 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import or_, select, tuple_
+from sqlalchemy import String, func, or_, select, tuple_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import InstrumentedAttribute, Session, aliased
 from sqlalchemy.sql.elements import ColumnElement
 
 from lakana_core.audit.service import AuditService
@@ -49,7 +49,14 @@ from lakana_core.models import (
     TaskStatus,
     TaskToken,
 )
-from lakana_core.pagination import Page, newest_first
+from lakana_core.pagination import (
+    Page,
+    SortField,
+    SortKey,
+    name_order,
+    newest_or_sorted,
+    parse_sort,
+)
 from lakana_core.projects.manifest import (
     entry_keep_versions,
     entry_output,
@@ -65,6 +72,16 @@ default, so a caller that never wires a `Settings` instance through (tests,
 direct `TaskTokenService` construction) still gets the same one-day ceiling
 a production deployment does.
 """
+
+TASK_TOKEN_SORTS: dict[str, bool] = {
+    "issued": True,
+    "environment": False,
+    "purpose": False,
+    "principal": False,
+    "expires": False,
+}
+"""The fields the live task tokens sort by, each with whether it runs from the largest down by
+default: the newest first, names from A, the soonest to end first."""
 
 
 def _is_invalid_asset_pattern(pattern: str) -> bool:
@@ -1017,6 +1034,51 @@ class TaskTokenService:
             asset_scope=scope.asset_scope,
         )
 
+    def _task_token_sorts(self) -> dict[str, SortField]:
+        """Build the keys of each field the live task tokens sort by.
+
+        Returns
+        -------
+        dict
+            Each of `TASK_TOKEN_SORTS` to its keys; the tokens of one value newest first.
+        """
+        newest = SortKey(TaskToken.issued_at, datetime, descending=True)
+        task = TaskRun.id == TaskToken.task_run_id
+        purpose: ColumnElement[str] = func.coalesce(
+            select(Run.job).join(TaskRun, TaskRun.run_id == Run.id).where(task).scalar_subquery(),
+            select(TaskRun.asset).where(task).scalar_subquery(),
+            type_=String,
+        )
+        principal = select(Principal.name).where(Principal.id == TaskToken.principal_id)
+
+        def by_name(
+            name: ColumnElement[str] | InstrumentedAttribute[str], *, nullable: bool = False
+        ) -> SortField:
+            """Sort by a name from A, the tokens of one name newest first.
+
+            Parameters
+            ----------
+            name
+                The name.
+            nullable
+                Whether a token can have none.
+
+            Returns
+            -------
+            SortField
+                The field.
+            """
+            key = SortKey(name_order(self._session, name), str, nullable=nullable)
+            return SortField((key, newest), descending=False)
+
+        return {
+            "issued": SortField((newest._replace(descending=None),), descending=True),
+            "environment": by_name(TaskToken.environment),
+            "purpose": by_name(purpose, nullable=True),
+            "principal": by_name(principal.scalar_subquery()),
+            "expires": SortField((SortKey(TaskToken.expires_at, datetime), newest), False),
+        }
+
     def list_live(
         self,
         p: PrincipalRef,
@@ -1024,6 +1086,8 @@ class TaskTokenService:
         environment: str | None = None,
         limit: int = 100,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> Page[ListedTaskToken]:
         """List the live task tokens, newest first, one page at a time.
 
@@ -1037,16 +1101,23 @@ class TaskTokenService:
         limit
             Most tokens returned.
         cursor
-            The `next_cursor` of the previous page. Send the same `environment` with every
-            page.
+            The `next_cursor` of the previous page. Send the same `environment` and sort with
+            every page.
+        sort
+            What the list is sorted by: ``issued`` (the default), ``environment``, ``purpose``
+            (the job of the token's run, else its asset; a token minted by hand last in either
+            direction), ``principal`` or ``expires``; the tokens of one value newest first.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``issued``, ``asc`` for the others.
 
         Returns
         -------
         Page of ListedTaskToken
             The tokens neither revoked nor expired, nor minted with a personal access token that
             is revoked or has expired or whose owner is deactivated, by issue time, newest
-            first, equal times by id, each with its principal's name and, for a token bound to
-            a task, its run, job and asset, and the cursor of the next page.
+            first, equal times by id (or in the sort asked for), each with its principal's name
+            and, for a token bound to a task, its run, job and asset, and the cursor of the
+            next page.
 
         Raises
         ------
@@ -1054,10 +1125,11 @@ class TaskTokenService:
             If the acting principal does not hold the `ADMIN` role on the instance
             (`MANAGE_TOKEN` works only with it); a task or CI token is refused too.
         ValidationError
-            If `limit` is below 1 or `cursor` is not one this server issued for the task-token
-            list.
+            If `limit` is below 1, `sort` or `order` is unknown, or `cursor` is not one this
+            server issued for the task-token list in this sort.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
+        chosen = parse_sort(sort, order, TASK_TOKEN_SORTS, "issued")
         now = datetime.now(UTC)
         minter = aliased(Principal)
         query = (
@@ -1080,13 +1152,15 @@ class TaskTokenService:
         )
         if environment is not None:
             query = query.where(TaskToken.environment == environment)
-        page = newest_first(
+        page = newest_or_sorted(
             self._session,
             query,
             kind="task-tokens",
+            sort=chosen,
+            fields=self._task_token_sorts(),
+            newest="issued",
             at=TaskToken.issued_at,
             row_id=TaskToken.id,
-            at_of=lambda row: row.issued_at,
             limit=limit,
             cursor=cursor,
         )

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from core_test_helpers import _prepared_catalog
 from home_test_helpers import deployed_job, finished_run, grant, person
+from sqlalchemy import delete
 from sqlalchemy.orm import Session
 from test_projects_dag import make_asset
 from test_projects_deploys import _deployed, _repo
@@ -17,7 +18,7 @@ from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef
 from lakana_core.errors import NotFoundError, PermissionDenied, ValidationError
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
-from lakana_core.models import JobVersion, Run, RunStatus, RunTrigger
+from lakana_core.models import JobVersion, Run, RunStatus, RunTrigger, TaskRun
 from lakana_core.pagination import encode_cursor
 from lakana_core.projects.run_policy import RunCaps
 from lakana_core.runs.selection import Selection
@@ -548,8 +549,11 @@ def test_an_unknown_sort_or_order_is_refused_with_the_choices(
     session: Session, version: JobVersion, principal: PrincipalRef
 ) -> None:
     service = _service(session)
-    with pytest.raises(ValidationError, match="`sort` must be one of: created, name, status"):
-        service.list_runs_page(principal, "dev", sort="duration")
+    with pytest.raises(
+        ValidationError,
+        match="`sort` must be one of: created, duration, environment, name, status, tasks, trigger",
+    ):
+        service.list_runs_page(principal, "dev", sort="commit")
     with pytest.raises(ValidationError, match="`order` must be asc or desc; got 'up'"):
         service.list_runs_page(principal, "dev", sort="name", order="up")
 
@@ -604,3 +608,45 @@ def test_all_runs_sort_across_environments(session: Session, admin: PrincipalRef
     assert by_name is not None
     with pytest.raises(ValidationError, match="came from the `all-runs` list"):
         service.list_runs_page(admin, "dev", sort="name", cursor=by_name)
+
+
+def test_runs_sort_by_duration_trigger_and_tasks_a_missing_value_last(
+    session: Session, version: JobVersion, principal: PrincipalRef
+) -> None:
+    long = _make_run(session, principal, minutes=1, trigger=RunTrigger.SCHEDULE)
+    short = _make_run(session, principal, minutes=2, trigger=RunTrigger.API)
+    waiting = _make_run(session, principal, minutes=3)
+    long.started_at, long.finished_at = _T0, _T0 + timedelta(minutes=10)
+    short.started_at, short.finished_at = _T0, _T0 + timedelta(minutes=1)
+    waiting.started_at = waiting.finished_at = None
+    session.execute(delete(TaskRun).where(TaskRun.run_id == short.id))
+    session.commit()
+    service = _service(session)
+    assert _walk(service, principal, sort="duration") == [long.id, short.id, waiting.id]
+    assert _walk(service, principal, sort="duration", order="asc") == [
+        short.id,
+        long.id,
+        waiting.id,
+    ]
+    assert _walk(service, principal, sort="trigger") == [short.id, long.id, waiting.id]
+    assert _walk(service, principal, sort="tasks") == [waiting.id, long.id, short.id]
+    assert _walk(service, principal, sort="tasks", order="asc") == [
+        short.id,
+        waiting.id,
+        long.id,
+    ]
+
+
+def test_runs_of_every_environment_sort_by_environment_newest_first_within_one(
+    session: Session, admin: PrincipalRef
+) -> None:
+    runs = _three_environments(session)
+    service = RunService(session, _grants(session))
+    seen: list[uuid.UUID] = []
+    cursor = None
+    while True:
+        page, cursor = service.list_all_runs_page(admin, limit=1, cursor=cursor, sort="environment")
+        seen += [v.id for v in page]
+        if cursor is None:
+            break
+    assert seen == [runs[n].id for n in (6, 3, 0, 4, 2, 5, 1)]

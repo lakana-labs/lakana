@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, Response
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.identity.pats import ListedPat, PatService
-from lakana_server.api.platform.listing import set_next_cursor
+from lakana_server.api.platform.listing import CursorParam, OrderParam, SortParam, set_next_cursor
 from lakana_server.api.platform.schemas import TokenIssueIn, TokenIssueOut, TokenOut
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
@@ -139,17 +139,20 @@ def list_all_tokens(
     response: Response,
     owner: str | None = Query(default=None, max_length=255),
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     service: PatService = Depends(get_pat_service),
 ) -> list[TokenOut]:
     """List every owner's live tokens.
 
-    Lists the personal access tokens that are neither revoked nor expired, newest first, each
-    with its owner. The token values are never included. Needs the `ADMIN` role on the
-    instance; a task or CI token is refused. The cursor of the next page is in the
-    `X-Next-Cursor` response header and is absent on the last page. Answers 404 when `owner`
-    names no principal.
+    Lists the personal access tokens that are neither revoked nor expired, newest first (or in
+    the order `sort` and `order` ask for), each with its owner. The token values are never
+    included. Needs the `ADMIN` role on the instance; a task or CI token is refused. The cursor
+    of the next page is in the `X-Next-Cursor` response header and is absent on the last page.
+    Answers 404 when `owner` names no principal. Answers 422 for an unknown `sort` or `order`,
+    or a cursor this list did not issue in this order; send the same sort with every page.
 
     Parameters
     ----------
@@ -161,6 +164,11 @@ def list_all_tokens(
         Most tokens returned (1 to 200).
     cursor
         The `X-Next-Cursor` of the previous page; send the same `owner`.
+    sort
+        What the list is sorted by: `created` (the default), `owner`, `name`, `last_used` or
+        `expires`; a token never used or that never ends comes last.
+    order
+        `asc` or `desc`; by default `desc` for `created` and `last_used`, `asc` for the others.
     principal
         The authenticated caller.
     service
@@ -176,7 +184,9 @@ def list_all_tokens(
     lakana_core.errors.NotFoundError
         Mapped to 404 by `install_exception_handlers`.
     """
-    page = service.list_all(principal, owner=owner, limit=limit, cursor=cursor)
+    page = service.list_all(
+        principal, owner=owner, limit=limit, cursor=cursor, sort=sort, order=order
+    )
     set_next_cursor(response, page.next_cursor)
     return [_token_out(listed) for listed in page.items]
 

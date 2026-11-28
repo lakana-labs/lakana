@@ -196,8 +196,9 @@ def list_deploys(
     cursor
         The `X-Next-Cursor` of the previous page.
     sort
-        What the list is sorted by: `created` (the default) or `status`; deploys of one state
-        come newest first.
+        What the list is sorted by: `created` (the default), `status`, `kind`, `repository`
+        or `who` (whoever asked; a deploy whose submitter was deleted last); deploys of one
+        value come newest first.
     order
         `asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for
         `status`.
@@ -493,15 +494,18 @@ def list_orphans(
     env: str,
     limit: int = Query(default=100, ge=1, le=200),
     cursor: TableCursorParam = None,
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     service: DeployService = Depends(get_deploy_service),
 ) -> OrphansOut:
     """List tables no project produces any more, one page at a time.
 
     Lists the tables that earlier project versions produced and the current ones do not,
-    including dropped ones that can still be restored (`exists` is false). Needs
-    `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 for a cursor
-    this list did not issue.
+    including dropped ones that can still be restored (`exists` is false), by repository or in
+    the order `sort` and `order` ask for. Needs `READ_ENVIRONMENT`. Answers 404 when the
+    environment does not exist and 422 for an unknown `sort` or `order`, or a cursor this list
+    did not issue in this order.
 
     Parameters
     ----------
@@ -511,6 +515,11 @@ def list_orphans(
         Most orphans returned (1 to 200).
     cursor
         The `next_cursor` of the previous page.
+    sort
+        What the list is sorted by: `repository` (the default, then the table), `name` (the
+        table's name) or `kind`.
+    order
+        `asc` or `desc`; `asc` by default.
     principal
         The authenticated caller.
     service
@@ -521,7 +530,7 @@ def list_orphans(
     OrphansOut
         Readable orphans and a hidden count.
     """
-    report = service.orphans(principal, env, limit=limit, cursor=cursor)
+    report = service.orphans(principal, env, limit=limit, cursor=cursor, sort=sort, order=order)
     return OrphansOut(
         orphans=[
             OrphanOut(

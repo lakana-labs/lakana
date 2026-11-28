@@ -399,10 +399,14 @@ from lakana_core.models.table import table_kind
 from lakana_core.pagination import (
     LIST_LIMIT_DEFAULT,
     LIST_LIMIT_MAX,
+    ListSort,
     Page,
     escape_like,
     instant_key,
     page_in_order,
+    page_sorted_in_python,
+    parse_sort,
+    table_name_key,
 )
 from lakana_core.policy.resolver import PolicyResolver
 from lakana_core.policy.schema_change import (
@@ -1221,6 +1225,33 @@ _LANDED_OUTCOMES = frozenset(
 
 _COMMITTED_BY_THE_ROLLBACK = frozenset({RollbackOutcome.ROLLED_BACK, RollbackOutcome.UNPUBLISHED})
 """The outcomes whose audit event, results and stamp land in the rollback's own commit."""
+
+
+DROPPED_SORTS: dict[str, bool] = {"dropped": True, "name": False, "purge": False}
+"""The fields the dropped tables sort by, each with whether it runs from the largest down by
+default: the latest drop first, names from A, the soonest purge first."""
+
+_DROPPED_KEYS: dict[str, Callable[[DroppedTable, bool], tuple[str, ...]]] = {
+    "dropped": lambda d, _down: (instant_key(d.dropped_at), str(d.table_id)),
+    "name": lambda d, _down: table_name_key(d.name, str(d.namespace), d.table_id),
+    "purge": lambda d, _down: (instant_key(d.purge_after), str(d.table_id)),
+}
+"""How each field of the dropped tables keys a table; its id keeps the key unique."""
+
+EXPIRING_SORTS: dict[str, bool] = {"expires": False, "name": False}
+"""The fields the expiring tables sort by: the soonest first, names from A."""
+
+_EXPIRING_KEYS: dict[str, Callable[[TableRetention, bool], tuple[str, ...]]] = {
+    "expires": lambda entry, _down: (
+        instant_key(entry.expires_at),  # ty: ignore[invalid-argument-type]
+        entry.ref.dotted(),
+        str(entry.table_id),
+    ),
+    "name": lambda entry, _down: table_name_key(
+        entry.ref.name, str(entry.ref.namespace), entry.table_id
+    ),
+}
+"""How each field of the expiring tables keys a table; only a table that expires is listed."""
 
 
 class _RollbackReason(LakanaError):
@@ -4999,6 +5030,8 @@ class CatalogService:
         namespace: NamespacePath | None = None,
         limit: int = LIST_LIMIT_DEFAULT,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> Page[TableRetention]:
         """List the managed tables of an environment that expire within some days, soonest first.
 
@@ -5015,7 +5048,12 @@ class CatalogService:
         limit
             The page size, 1 to 200.
         cursor
-            The `next_cursor` of the previous page.
+            The `next_cursor` of the previous page; send the same sort with every page.
+        sort
+            What the list is sorted by: ``expires`` (the default, then by dotted name) or
+            ``name`` (the table's name in any letter case, then its namespace).
+        order
+            ``asc`` or ``desc``; ``asc`` by default.
 
         Returns
         -------
@@ -5032,10 +5070,12 @@ class CatalogService:
         PermissionDenied
             Without `READ_ENVIRONMENT` on it.
         ValidationError
-            If `within_days` or `limit` is out of range, or `cursor` is not one this list issued.
+            If `within_days` or `limit` is out of range, `sort` or `order` is unknown, or
+            `cursor` is not one this list issued in this sort.
         """
         check_days(within_days, "The window")
         self._authz.authorize(p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment))
+        chosen = parse_sort(sort, order, EXPIRING_SORTS, "expires")
         env = self._find_environment(environment)
         until = db_now(self._session) + timedelta(days=within_days)
         found = describe_retentions(self._session, env, retention_candidates(self._session, env))
@@ -5050,14 +5090,12 @@ class CatalogService:
             )
             and self.can_read_table(p, entry.ref)
         ]
-        return page_in_order(
+        return page_sorted_in_python(
             due,
             kind="expiring_tables",
-            key_of=lambda entry: (
-                instant_key(entry.expires_at),  # ty: ignore[invalid-argument-type]
-                entry.ref.dotted(),
-                str(entry.table_id),
-            ),
+            sort=chosen,
+            default=ListSort("expires", descending=False),
+            keys=_EXPIRING_KEYS,
             limit=limit,
             cursor=cursor,
         )
@@ -10728,7 +10766,13 @@ class CatalogService:
         )
 
     def list_dropped_tables(
-        self, p: PrincipalRef, environment: str, namespace: NamespacePath
+        self,
+        p: PrincipalRef,
+        environment: str,
+        namespace: NamespacePath,
+        *,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> list[DroppedTable]:
         """List the dropped tables of a namespace whose files are not deleted yet.
 
@@ -10740,13 +10784,17 @@ class CatalogService:
             Environment name.
         namespace
             The namespace the tables were dropped from.
+        sort
+            What the list is sorted by: ``dropped`` (the default), ``name`` or ``purge``.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``dropped``, ``asc`` for the others.
 
         Returns
         -------
         list of DroppedTable
-            Newest drop first, each with its purge date and whether it can still be restored.
-            One the caller may not read by its name (a token narrowed to some tables) is left
-            out, as the table list leaves out a table.
+            Newest drop first (or in the sort asked for), each with its purge date and whether
+            it can still be restored. One the caller may not read by its name (a token narrowed
+            to some tables) is left out, as the table list leaves out a table.
 
         Raises
         ------
@@ -10754,10 +10802,13 @@ class CatalogService:
             If the environment or namespace does not exist.
         PermissionDenied
             If the principal may not read this namespace (the rule of `list_tables`).
+        ValidationError
+            If `sort` or `order` is unknown.
         """
         self._authz.authorize(
             p, Action.READ_TABLE, Securable.namespace_scope(environment, namespace)
         )
+        chosen = parse_sort(sort, order, DROPPED_SORTS, "dropped")
         env = self._find_environment(environment)
         self._find_namespace(env, namespace)
         dropped = list_tombstones(self._session, env.id, namespace, now=db_now(self._session))
@@ -10766,6 +10817,8 @@ class CatalogService:
             for entry in dropped
             if self.can_read_table(p, TableRef(environment, namespace, entry.name))
         ]
+        key = _DROPPED_KEYS[chosen.field]
+        readable.sort(key=lambda entry: key(entry, chosen.descending), reverse=chosen.descending)
         return self._with_undrop(p, environment, readable)
 
     def list_environment_dropped_tables(
@@ -10775,6 +10828,8 @@ class CatalogService:
         *,
         limit: int = LIST_LIMIT_DEFAULT,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> Page[DroppedTable]:
         """List the dropped tables of every namespace of an environment, newest drop first.
 
@@ -10787,7 +10842,12 @@ class CatalogService:
         limit
             The page size, 1 to 200.
         cursor
-            The `next_cursor` of the previous page.
+            The `next_cursor` of the previous page; send the same sort with every page.
+        sort
+            What the list is sorted by: ``dropped`` (the default), ``name`` (the table's name in
+            any letter case, then its namespace) or ``purge`` (when its files are deleted).
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``dropped``, ``asc`` for the others.
 
         Returns
         -------
@@ -10803,9 +10863,11 @@ class CatalogService:
         PermissionDenied
             Without `READ_ENVIRONMENT` on it.
         ValidationError
-            If `limit` is out of range, or `cursor` is not one this list issued.
+            If `limit` is out of range, `sort` or `order` is unknown, or `cursor` is not one
+            this list issued in this sort.
         """
         self._authz.authorize(p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment))
+        chosen = parse_sort(sort, order, DROPPED_SORTS, "dropped")
         env = self._find_environment(environment)
         dropped = list_environment_tombstones(self._session, env.id, now=db_now(self._session))
         readable = [
@@ -10813,13 +10875,14 @@ class CatalogService:
             for entry in dropped
             if self.can_read_table(p, TableRef(environment, entry.namespace, entry.name))
         ]
-        page = page_in_order(
+        page = page_sorted_in_python(
             readable,
             kind="dropped_tables",
-            key_of=lambda d: (instant_key(d.dropped_at), str(d.table_id)),
+            sort=chosen,
+            default=ListSort("dropped", descending=True),
+            keys=_DROPPED_KEYS,
             limit=limit,
             cursor=cursor,
-            descending=True,
         )
         return Page(self._with_undrop(p, environment, page.items), page.next_cursor)
 

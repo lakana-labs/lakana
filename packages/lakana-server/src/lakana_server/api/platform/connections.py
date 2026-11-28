@@ -234,7 +234,7 @@ def list_connections(
     sort
         What the list is sorted by: `created` (the default), `name` (in any letter case) or
         `status`, the last test: failed first, then queued or running, then passed, never
-        tested last; one state by name.
+        tested last; `kind` or `environment`; one state, kind or environment by name.
     order
         `asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the
         others.

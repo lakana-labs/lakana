@@ -5340,3 +5340,44 @@ def test_get_of_a_dry_run_has_no_jobs(session: Session, env: None, principal: Pr
     service = DeployService(session, AllowAllAuthorization())
     queued = service.submit(principal, "dev", repository="analytics", kind=DeployKind.DRY_RUN)
     assert service.get(principal, "dev", queued.id).jobs is None
+
+
+def test_orphans_sort_by_name_and_kind_one_a_page(
+    session: Session, env: None, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """By the table's name, then its repository; one kind of each sorts by name too."""
+    service = _orphans_of_two_repositories(session, principal, tmp_path)
+
+    def walk(**sort: str) -> list[tuple[str, str]]:
+        """Read every orphan one a page.
+
+        Parameters
+        ----------
+        **sort
+            `sort` and `order`.
+
+        Returns
+        -------
+        list of tuple
+            The repository and the table of each, in the order the pages gave them.
+        """
+        seen: list[tuple[str, str]] = []
+        cursor: str | None = None
+        while True:
+            report = service.orphans(principal, "dev", limit=1, cursor=cursor, **sort)
+            seen += [(o.repository, o.table) for o in report.orphans]
+            if report.next_cursor is None:
+                return seen
+            cursor = report.next_cursor
+
+    by_name = [("repo_a", "silver.x"), ("repo_b", "silver.x"), ("repo_a", "silver.y")]
+    assert walk(sort="name") == by_name
+    assert walk(sort="name", order="desc") == by_name[::-1]
+    assert walk(sort="kind") == by_name
+    assert walk(sort="repository", order="desc") == [
+        ("repo_b", "silver.x"),
+        ("repo_a", "silver.y"),
+        ("repo_a", "silver.x"),
+    ]
+    with pytest.raises(ValidationError, match="`sort` must be one of: kind, name, repository"):
+        service.orphans(principal, "dev", sort="exists")

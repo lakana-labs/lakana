@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal, NoReturn
 
-from sqlalchemy import Select, case, func, or_, select
+from sqlalchemy import Select, String, case, func, or_, select, type_coerce
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.selectable import ScalarSelect
@@ -191,9 +191,15 @@ class LastTest:
     detail: LastTestDetail | None
 
 
-CONNECTION_SORTS: dict[str, bool] = {"created": True, "name": False, "status": False}
+CONNECTION_SORTS: dict[str, bool] = {
+    "created": True,
+    "name": False,
+    "status": False,
+    "kind": False,
+    "environment": False,
+}
 """The fields the connections lists sort by, each with whether it runs from the largest down by
-default: the newest first, names from A, problems first."""
+default: the newest first, names, kinds and environments from A, problems first."""
 
 
 def _last_test_rank() -> ScalarSelect[int]:
@@ -251,7 +257,8 @@ def _connection_page(
     -------
     Page of Connection
         The rows and the cursor of the next page. By name: in any letter case. By state: the
-        rank of `_last_test_rank`, never tested last, then by name.
+        rank of `_last_test_rank`, never tested last, then by name. By kind (the stored word) and
+        by environment: then by name.
 
     Raises
     ------
@@ -271,12 +278,27 @@ def _connection_page(
             cursor=cursor,
         )
     by_name = SortKey(name_order(session, Connection.name), str)
+    environment = select(Environment.name).where(Environment.id == Connection.environment_id)
     fields = {
         "created": SortField((SortKey(Connection.created_at, datetime),), descending=True),
         "name": SortField((by_name,), descending=False),
         "status": SortField(
             (
                 SortKey(_last_test_rank(), SMALLINT_KEY, nullable=True),
+                by_name._replace(descending=False),
+            ),
+            descending=False,
+        ),
+        "kind": SortField(
+            (
+                SortKey(type_coerce(Connection.kind, String), str),
+                by_name._replace(descending=False),
+            ),
+            descending=False,
+        ),
+        "environment": SortField(
+            (
+                SortKey(name_order(session, environment.scalar_subquery()), str),
                 by_name._replace(descending=False),
             ),
             descending=False,

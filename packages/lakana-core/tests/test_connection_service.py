@@ -3313,8 +3313,10 @@ def test_connections_refuse_an_unknown_sort_and_another_sorts_cursor(world: Worl
     for name in ("one", "two"):
         world.postgres(world.data_engineer, name=name, secret_values=None)
     service = world.connections()
-    with pytest.raises(ValidationError, match="`sort` must be one of: created, name, status"):
-        service.list(world.analyst, "prod", sort="kind")
+    with pytest.raises(
+        ValidationError, match="`sort` must be one of: created, environment, kind, name, status"
+    ):
+        service.list(world.analyst, "prod", sort="where")
     page = service.list(world.analyst, "prod", limit=1, sort="name")
     with pytest.raises(
         ValidationError, match="sorted by `status:asc`: it came from the list sorted by `name:asc`"
@@ -3341,3 +3343,37 @@ def test_the_cross_environment_list_sorts_by_name(world: World) -> None:
     assert [view.name for view in oldest.items] == ["p-1", "d-1", "a-2", "d-2"]
     by_env = service.list_all(world.data_engineer, environment="dev", sort="name", order="desc")
     assert [view.name for view in by_env.items] == ["d-2", "d-1"]
+
+
+def test_the_cross_environment_list_sorts_by_environment_and_kind_then_name(world: World) -> None:
+    _environment(world, "stage")
+    made = [("prod", "p-1"), ("dev", "d-2"), ("stage", "s-1"), ("prod", "a-2"), ("dev", "d-1")]
+    for minute, (environment, name) in enumerate(made):
+        _made_at(world, environment, name, _NOW + timedelta(minutes=minute))
+    service = world.connections()
+
+    def walk(**sort: str) -> list[str]:
+        """Read every connection one a page.
+
+        Parameters
+        ----------
+        **sort
+            `sort` and `order`.
+
+        Returns
+        -------
+        list of str
+            The names in the order the pages gave them.
+        """
+        seen: list[str] = []
+        cursor: str | None = None
+        while True:
+            page = service.list_all(world.data_engineer, limit=1, cursor=cursor, **sort)
+            seen += [view.name for view in page.items]
+            if page.next_cursor is None:
+                return seen
+            cursor = page.next_cursor
+
+    assert walk(sort="environment") == ["d-1", "d-2", "a-2", "p-1"]
+    assert walk(sort="environment", order="desc") == ["a-2", "p-1", "d-1", "d-2"]
+    assert walk(sort="kind") == ["a-2", "d-1", "d-2", "p-1"]

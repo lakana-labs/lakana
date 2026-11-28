@@ -28,13 +28,31 @@ from lakana_core.identity.sessions import (
 from lakana_core.identity.task_tokens import revoke_task_tokens_of_pat
 from lakana_core.identity.tokens import generate_token, hash_secret, verify_secret
 from lakana_core.models import AuditEventType, PersonalAccessToken, Principal
-from lakana_core.pagination import Page, newest_first
+from lakana_core.pagination import (
+    Page,
+    SortField,
+    SortKey,
+    name_order,
+    newest_or_sorted,
+    parse_sort,
+)
 
 OWN_TOKEN_FROM_BROWSER = (
     "A token cannot create a token. Create your own token in the web interface, under your "  # nosec B105 -- a refusal message, not a credential
     "name, after touching your passkey; or ask an administrator: lakana token issue NAME LABEL"
 )
 """The refusal of a token that tries to create a token for its own owner."""
+
+TOKEN_SORTS: dict[str, bool] = {
+    "created": True,
+    "owner": False,
+    "name": False,
+    "last_used": True,
+    "expires": False,
+}
+"""The fields the list of every owner's tokens sorts by, each with whether it runs from the
+largest down by default: the newest and the latest used first, names from A, the soonest to end
+first."""
 
 
 @dataclass(frozen=True)
@@ -375,6 +393,8 @@ class PatService:
         owner: str | None = None,
         limit: int = 100,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> Page[ListedPat]:
         """List the live PATs of every principal, newest first, one page at a time.
 
@@ -387,13 +407,22 @@ class PatService:
         limit
             Most tokens returned.
         cursor
-            The `next_cursor` of the previous page. Send the same `owner` with every page.
+            The `next_cursor` of the previous page. Send the same `owner` and sort with every
+            page.
+        sort
+            What the list is sorted by: ``created`` (the default), ``owner``, ``name``,
+            ``last_used`` or ``expires``; a token never used or that never ends comes last in
+            either direction, and the tokens of one value newest first.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created`` and ``last_used``, ``asc``
+            for the others.
 
         Returns
         -------
         Page of ListedPat
             The tokens neither revoked nor expired, by creation time, newest first, equal times
-            by id, each with its owner's name, and the cursor of the next page.
+            by id (or in the sort asked for), each with its owner's name, and the cursor of the
+            next page.
 
         Raises
         ------
@@ -403,10 +432,11 @@ class PatService:
         NotFoundError
             If `owner` is given and no principal has that name.
         ValidationError
-            If `limit` is below 1 or `cursor` is not one this server issued for the tokens
-            list.
+            If `limit` is below 1, `sort` or `order` is unknown, or `cursor` is not one this
+            server issued for the tokens list in this sort.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
+        chosen = parse_sort(sort, order, TOKEN_SORTS, "created")
         query = select(PersonalAccessToken).where(
             PersonalAccessToken.revoked_at.is_(None),
             or_(
@@ -416,13 +446,33 @@ class PatService:
         )
         if owner is not None:
             query = query.where(PersonalAccessToken.principal_id == self._get_principal(owner).id)
-        page = newest_first(
+        token = PersonalAccessToken
+        newest = SortKey(token.created_at, datetime, descending=True)
+        owner_name = select(Principal.name).where(Principal.id == token.principal_id)
+        page = newest_or_sorted(
             self._session,
             query,
             kind="tokens",
-            at=PersonalAccessToken.created_at,
-            row_id=PersonalAccessToken.id,
-            at_of=lambda row: row.created_at,
+            sort=chosen,
+            fields={
+                "created": SortField((newest._replace(descending=None),), descending=True),
+                "owner": SortField(
+                    (SortKey(name_order(self._session, owner_name.scalar_subquery()), str), newest),
+                    descending=False,
+                ),
+                "name": SortField(
+                    (SortKey(name_order(self._session, token.name), str), newest), False
+                ),
+                "last_used": SortField(
+                    (SortKey(token.last_used_at, datetime, nullable=True), newest), True
+                ),
+                "expires": SortField(
+                    (SortKey(token.expires_at, datetime, nullable=True), newest), False
+                ),
+            },
+            newest="created",
+            at=token.created_at,
+            row_id=token.id,
             limit=limit,
             cursor=cursor,
         )

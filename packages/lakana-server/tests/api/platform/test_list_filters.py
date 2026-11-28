@@ -273,17 +273,28 @@ def test_deploys_filter_by_repository_and_page(client: TestClient) -> None:
 
 
 _SORTABLE = {
-    _RUNS: "created, name, status",
-    "/api/v1/runs": "created, name, status",
-    _DEPLOYS: "created, status",
-    "/api/v1/deploys": "created, status",
-    "/api/v1/environments/dev/jobs": "last_run, name, next_run, status",
-    "/api/v1/environments/dev/connections": "created, name, status",
-    "/api/v1/connections": "created, name, status",
+    _RUNS: "created, duration, environment, name, status, tasks, trigger",
+    "/api/v1/runs": "created, duration, environment, name, status, tasks, trigger",
+    _DEPLOYS: "created, kind, repository, status, who",
+    "/api/v1/deploys": "created, kind, repository, status, who",
+    "/api/v1/environments/dev/jobs": "environment, last_run, name, next_run, repository, schedule, status",
+    "/api/v1/environments/dev/connections": "created, environment, kind, name, status",
+    "/api/v1/connections": "created, environment, kind, name, status",
     "/api/v1/environments/dev/saved-queries": "created, name, updated",
     "/api/v1/saved-queries": "created, name, updated",
     "/api/v1/principals": "created, name, status",
-    "/api/v1/audit-events": "occurred",
+    "/api/v1/audit-events": "event, occurred, on, who",
+    "/api/v1/grants": "granted, on, what, who",
+    "/api/v1/groups": "created, name",
+    "/api/v1/row-filters": "created, on, who",
+    "/api/v1/column-masks": "column, created, on, who",
+    "/api/v1/tokens": "created, expires, last_used, name, owner",
+    "/api/v1/task-tokens": "environment, expires, issued, principal, purpose",
+    "/api/v1/environments/dev/dropped-tables": "dropped, name, purge",
+    "/api/v1/environments/dev/expiring-tables": "expires, name",
+    "/api/v1/environments/dev/orphans": "kind, name, repository",
+    "/api/v1/environments/dev/queries": "created, status",
+    "/api/v1/queries": "created, status",
 }
 """Every list a person can sort by a column, with the fields it sorts by."""
 

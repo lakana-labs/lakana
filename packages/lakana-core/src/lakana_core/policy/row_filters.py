@@ -27,7 +27,7 @@ from lakana_core.policy.columns import (
 from lakana_core.policy.expression_types import check_expression_types
 from lakana_core.policy.expressions import columns_of
 from lakana_core.policy.field_binding import FIELD_IDS, PolicyBinding
-from lakana_core.policy.shown import PolicyShowing
+from lakana_core.policy.shown import ROW_FILTER_SORTS, PolicyShowing
 
 
 def _check_columns_exist(
@@ -112,6 +112,7 @@ class RowFilterService(PolicyShowing[RowFilter]):
 
     _model = RowFilter
     _list_kind = "row-filters"
+    _sorts = ROW_FILTER_SORTS
 
     def __init__(
         self, session: Session, authz: AuthorizationService, catalog: ColumnSource

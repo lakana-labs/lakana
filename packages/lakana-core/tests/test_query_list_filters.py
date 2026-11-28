@@ -244,3 +244,56 @@ def test_since_without_a_time_zone_is_refused(
         QueryService(session, SUBMITTER).list_queries_page(
             principal, "dev", include_ended=True, since=datetime(2026, 10, 18, 9, 30)
         )
+
+
+def test_a_sort_orders_the_same_rows_across_the_parts_one_a_page(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    env = _env(session, principal, tmp_path, "dev")
+    running = _add_run(session, env, principal, QueryRunStatus.RUNNING, age=300, started_at=_ago(5))
+    queued = _add_run(session, env, principal, age=100)
+    failed = _add_run(session, env, principal, QueryRunStatus.FAILED, age=500, finished_at=_ago(30))
+    done = _add_run(
+        session, env, principal, QueryRunStatus.SUCCEEDED, age=200, finished_at=_ago(60)
+    )
+    service = QueryService(session, SUBMITTER)
+
+    def walk(**sort: str) -> list[uuid.UUID]:
+        """Read every query one a page.
+
+        Parameters
+        ----------
+        **sort
+            `sort` and `order`.
+
+        Returns
+        -------
+        list of uuid.UUID
+            The ids in the order the pages gave them.
+        """
+        seen: list[uuid.UUID] = []
+        cursor: str | None = None
+        while True:
+            items, cursor = service.list_queries_page(
+                principal, "dev", include_ended=True, limit=1, cursor=cursor, **sort
+            )
+            seen += _ids(items)
+            if cursor is None:
+                return seen
+
+    assert walk(sort="created") == [queued.id, done.id, running.id, failed.id]
+    assert walk(sort="created", order="asc") == [failed.id, running.id, done.id, queued.id]
+    assert walk(sort="status") == [failed.id, queued.id, running.id, done.id]
+    assert sorted(walk(order="desc")) == sorted(walk())
+    _, by_state = service.list_queries_page(principal, "dev", limit=1, sort="status")
+    with pytest.raises(ValidationError, match="came from the list sorted by `status:asc`"):
+        service.list_queries_page(principal, "dev", sort="created", cursor=by_state)
+    with pytest.raises(ValidationError, match="in its default order"):
+        service.list_queries_page(principal, "dev", cursor=by_state)
+    _, own = service.list_queries_page(principal, "dev", limit=1)
+    with pytest.raises(ValidationError, match="came from the list in its default order"):
+        service.list_queries_page(principal, "dev", sort="status", cursor=own)
+    with pytest.raises(ValidationError, match="`sort` must be one of: created, status; got"):
+        service.list_queries_page(principal, "dev", sort="sql")
+    every, _ = service.list_all_queries_page(principal, include_ended=True, sort="created")
+    assert _ids(every) == [queued.id, done.id, running.id, failed.id]

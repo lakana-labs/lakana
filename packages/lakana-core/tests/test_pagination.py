@@ -29,6 +29,7 @@ from lakana_core.pagination import (
     encode_key_cursor,
     encode_sorted_cursor,
     instant_key,
+    last_if_missing,
     page_in_order,
     parse_choices,
 )
@@ -582,3 +583,13 @@ def test_a_namespace_cursor_issued_before_still_decodes() -> None:
         .decode()
     )
     assert decode_tuple_cursor("namespaces", issued) == ("gold", "sales")
+
+
+@pytest.mark.parametrize("descending", [False, True])
+def test_a_missing_value_sorts_last_in_either_direction(descending: bool) -> None:
+    """`last_if_missing` keeps a missing value after every present one, however the list runs."""
+    keys = [
+        (*last_if_missing(value, descending), name) for name, value in (("a", "x"), ("b", None))
+    ]
+    ordered = sorted(keys, reverse=descending)
+    assert [key[-1] for key in ordered] == ["a", "b"]

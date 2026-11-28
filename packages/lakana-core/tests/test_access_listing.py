@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from functools import partial
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -515,3 +516,112 @@ def test_list_grants_by_role_lists_exactly_that_role(session: Session, setup: _S
     ) == [setup.grants["alice-dev"].id]
     with pytest.raises(ValidationError, match=r"Give role or action, not both\."):
         service.list_grants(setup.admin, role=Role.ANALYST, action=Action.READ_TABLE)
+
+
+def _walk_grants(service: GrantService, admin: PrincipalRef, **sort: str) -> list[uuid.UUID]:
+    """Read every grant one a page, in a sort.
+
+    Parameters
+    ----------
+    service
+        The grant service.
+    admin
+        The administrator who lists.
+    **sort
+        `sort` and `order`.
+
+    Returns
+    -------
+    list of uuid.UUID
+        The ids, in the order the pages gave them.
+    """
+    seen: list[uuid.UUID] = []
+    cursor: str | None = None
+    while True:
+        page = service.list_grants(admin, limit=1, cursor=cursor, **sort)
+        seen.extend(_ids(page.items))
+        if page.next_cursor is None:
+            return seen
+        cursor = page.next_cursor
+
+
+def test_grants_sort_by_whom_what_and_where_and_page_without_a_gap(
+    session: Session, setup: _Setup
+) -> None:
+    service = GrantService(session, _auditing(session))
+    g = {label: grant.id for label, grant in setup.grants.items()}
+    walk = partial(_walk_grants, service, setup.admin)
+    assert walk(sort="who") == [g["admin"], g["alice-gold"], g["alice-dev"], g["team-deploy"]]
+    assert walk(sort="who", order="desc") == [
+        g["team-deploy"],
+        g["alice-gold"],
+        g["alice-dev"],
+        g["admin"],
+    ]
+    assert walk(sort="what") == [g["admin"], g["alice-dev"], g["team-deploy"], g["alice-gold"]]
+    assert walk(sort="on") == [g["admin"], g["team-deploy"], g["alice-dev"], g["alice-gold"]]
+    assert walk(sort="on", order="desc") == [
+        g["alice-gold"],
+        g["team-deploy"],
+        g["alice-dev"],
+        g["admin"],
+    ]
+    assert walk(sort="granted", order="asc") == [
+        g["admin"],
+        g["alice-dev"],
+        g["alice-gold"],
+        g["team-deploy"],
+    ]
+    assert walk(sort="granted") == walk()
+    assert walk(principal_name="alice", sort="who") == [g["alice-gold"], g["alice-dev"]]
+
+
+def test_grants_refuse_an_unknown_sort_and_a_cursor_of_another(
+    session: Session, setup: _Setup
+) -> None:
+    service = GrantService(session, _auditing(session))
+    with pytest.raises(ValidationError, match="`sort` must be one of: granted, on, what, who"):
+        service.list_grants(setup.admin, sort="note")
+    by_whom = service.list_grants(setup.admin, limit=1, sort="who").next_cursor
+    with pytest.raises(ValidationError, match="came from the list sorted by `who:asc`"):
+        service.list_grants(setup.admin, cursor=by_whom, sort="what")
+    with pytest.raises(ValidationError, match="default order"):
+        service.list_grants(setup.admin, cursor=by_whom)
+    newest = service.list_grants(setup.admin, limit=1).next_cursor
+    with pytest.raises(ValidationError, match="came from the list in its default order"):
+        service.list_grants(setup.admin, cursor=newest, sort="on")
+
+
+def test_groups_sort_by_name_in_any_letter_case(session: Session, setup: _Setup) -> None:
+    for minutes, name in enumerate(("data_eng", "Ops", "beta"), start=1):
+        session.add(Group(id=uuid.uuid4(), name=name, created_at=_T0 + timedelta(minutes=minutes)))
+    session.commit()
+    service = GroupService(session, _auditing(session))
+
+    def walk(**sort: str) -> list[str]:
+        """Read every group one a page.
+
+        Parameters
+        ----------
+        **sort
+            `sort` and `order`.
+
+        Returns
+        -------
+        list of str
+            The names in the order the pages gave them.
+        """
+        seen: list[str] = []
+        cursor: str | None = None
+        while True:
+            page = service.list_groups(setup.admin, limit=1, cursor=cursor, **sort)
+            seen.extend(group.name for group in page.items)
+            if page.next_cursor is None:
+                return seen
+            cursor = page.next_cursor
+
+    assert walk(sort="name") == ["beta", "data_eng", "Ops", "team"]
+    assert walk(sort="name", order="desc") == ["team", "Ops", "data_eng", "beta"]
+    assert walk(sort="created", order="asc") == ["team", "data_eng", "Ops", "beta"]
+    with pytest.raises(ValidationError, match="`sort` must be one of: created, name; got"):
+        service.list_groups(setup.admin, sort="members")

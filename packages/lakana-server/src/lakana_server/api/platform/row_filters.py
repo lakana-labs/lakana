@@ -15,7 +15,12 @@ from lakana_core.auth import PrincipalRef
 from lakana_core.models import RowFilter
 from lakana_core.policy.row_filters import RowFilterService
 from lakana_core.policy.shown import ShownPolicy
-from lakana_server.api.platform.listing import set_next_cursor
+from lakana_server.api.platform.listing import (
+    OrderParam,
+    PlaceCursorParam,
+    SortParam,
+    set_next_cursor,
+)
 from lakana_server.api.platform.namespace_forms import dotted_namespace, joined_namespace
 from lakana_server.api.platform.schemas import RowFilterCreate, RowFilterOut
 from lakana_server.api.platform.subjects import SubjectNames, subject_names
@@ -144,19 +149,23 @@ def list_row_filters(
     namespace: str | None = None,
     table: str | None = None,
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: PlaceCursorParam = None,
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     service: RowFilterService = Depends(get_row_filter_service),
     session: Session = Depends(get_session),
 ) -> list[RowFilterOut]:
     """List row filters.
 
-    Lists the active row filters, newest first. Every filter is optional, and they combine:
-    `principal_name` or `group_name` (not both) for whom a row filter is made to, and
-    `environment`, with `namespace` and then `table`, for where it applies (`namespace` needs
-    `environment`, and `table` needs `namespace`; 422 otherwise). Needs `MANAGE_POLICY` on the
-    instance. Answers 404 when no principal or group has the name given. The cursor of the
-    next page is in the `X-Next-Cursor` response header.
+    Lists the active row filters, newest first, or in the order `sort` and `order` ask for.
+    Every filter is optional, and they combine: `principal_name` or `group_name` (not both) for
+    whom a row filter is made to, and `environment`, with `namespace` and then `table`, for
+    where it applies (`namespace` needs `environment`, and `table` needs `namespace`; 422
+    otherwise). Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group
+    has the name given. The cursor of the next page is in the `X-Next-Cursor` response header.
+    Answers 422 for an unknown `sort` or `order`, or a cursor this list did not issue in this
+    order; send the same sort with every page.
 
     Parameters
     ----------
@@ -176,6 +185,10 @@ def list_row_filters(
         Most row filters returned (1 to 200).
     cursor
         The `X-Next-Cursor` of the previous page; send the same filters.
+    sort
+        What the list is sorted by: `created` (the default), `who` or `on`.
+    order
+        `asc` or `desc`; by default `desc` for `created`, `asc` for the others.
     principal
         The authenticated caller.
     service
@@ -197,6 +210,8 @@ def list_row_filters(
         table=table,
         limit=limit,
         cursor=cursor,
+        sort=sort,
+        order=order,
     )
     set_next_cursor(response, page.next_cursor)
     shown = service.shown(principal, page.items)

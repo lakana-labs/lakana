@@ -58,7 +58,13 @@ from lakana_core.catalog.translations import edit_translation, write_translation
 from lakana_core.catalog.usage import measure_table_sizes
 from lakana_core.config import DatabaseConfig, StorageConfig
 from lakana_core.db import create_engine
-from lakana_core.errors import AlreadyExistsError, ConflictError, NotFoundError, PermissionDenied
+from lakana_core.errors import (
+    AlreadyExistsError,
+    ConflictError,
+    NotFoundError,
+    PermissionDenied,
+    ValidationError,
+)
 from lakana_core.grants.service import GrantService
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import (
@@ -1593,3 +1599,57 @@ def test_dropped_tables_with_equal_drop_time_page_without_skip_or_repeat(
         if cursor is None:
             break
     assert sorted(seen) == sorted(ids)
+
+
+def test_dropped_tables_sort_by_name_and_purge_one_a_page(
+    session: Session, catalog: CatalogService, principal: PrincipalRef
+) -> None:
+    """Every sort pages one table at a time; a cursor of one sort is refused by another."""
+    t1, t2, t3 = _dropped_in_two_namespaces(session, catalog, principal)
+    soon = datetime.now(UTC) + timedelta(days=1)
+    for hours, table_id in enumerate((t2, t1, t3)):
+        session.execute(
+            update(TableLocation)
+            .where(TableLocation.table_id == table_id)
+            .values(purge_after=soon + timedelta(hours=hours))
+        )
+    session.commit()
+
+    def walk(**sort: str) -> list[uuid.UUID]:
+        """Read every dropped table one a page.
+
+        Parameters
+        ----------
+        **sort
+            `sort` and `order`.
+
+        Returns
+        -------
+        list of uuid.UUID
+            The table ids in the order the pages gave them.
+        """
+        seen: list[uuid.UUID] = []
+        cursor: str | None = None
+        while True:
+            page = catalog.list_environment_dropped_tables(
+                principal, "dev", limit=1, cursor=cursor, **sort
+            )
+            seen.extend(d.table_id for d in page.items)
+            if page.next_cursor is None:
+                return seen
+            cursor = page.next_cursor
+
+    assert walk(sort="name") == [t2, t3, t1]
+    assert walk(sort="name", order="desc") == [t1, t3, t2]
+    assert walk(sort="purge") == [t2, t1, t3]
+    assert walk(sort="dropped", order="asc") == [t1, t2, t3]
+    assert walk(sort="dropped") == walk() == [t3, t2, t1]
+    by_name = catalog.list_environment_dropped_tables(principal, "dev", limit=1, sort="name")
+    with pytest.raises(ValidationError, match="came from the `dropped_tables:name:asc` list"):
+        catalog.list_environment_dropped_tables(principal, "dev", cursor=by_name.next_cursor)
+    with pytest.raises(ValidationError, match="`sort` must be one of: dropped, name, purge"):
+        catalog.list_environment_dropped_tables(principal, "dev", sort="kind")
+    in_gold = catalog.list_dropped_tables(
+        principal, "dev", NamespacePath.from_parts(["gold"]), sort="name", order="desc"
+    )
+    assert [d.table_id for d in in_gold] == [t1, t3]
