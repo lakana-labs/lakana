@@ -21,6 +21,9 @@ import { NamePicker } from "../shell/NamePicker";
 import { Page } from "../shell/Page";
 import { PendingButton } from "../shell/PendingButton";
 import { useFocusAfter } from "../shell/useFocusAfter";
+import { type ListSortSpec, sortRows } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
@@ -101,6 +104,20 @@ function DeleteGroupDialog({ name, onDeleted, onCancel }: DeleteGroupDialogProps
   );
 }
 
+/** The columns the group's grants sort by, on the server; their own order is the newest first. */
+const GROUP_GRANT_SORTS: ListSortSpec<"what" | "on" | "granted"> = {
+  fields: { what: "asc", on: "asc", granted: "desc" },
+  natural: { field: "granted", order: "desc" },
+  param: "grants",
+};
+
+/** The members sort by name, in the browser, which holds them all; by name A to Z at first. */
+const MEMBER_SORTS: ListSortSpec<"name"> = {
+  fields: { name: "asc" },
+  natural: { field: "name", order: "asc" },
+  param: "members",
+};
+
 /** Properties of {@link GroupGrants}. */
 interface GroupGrantsProps {
   /** The group's name. */
@@ -119,9 +136,11 @@ function GroupGrants({ name }: GroupGrantsProps): JSX.Element {
   const when = useWhen();
   const id = useId();
   const heading = useRef<HTMLHeadingElement>(null);
+  const sorting = useListSort(GROUP_GRANT_SORTS);
+  const sort = sorting.choice;
   const load = useCallback(
-    () => listGrants({ who: { kind: "group", name }, what: null, where: null }, null),
-    [name],
+    () => listGrants({ who: { kind: "group", name }, what: null, where: null }, null, sort),
+    [name, sort],
   );
   const grants = useResource(load);
   const rows = grants.data?.items;
@@ -154,9 +173,11 @@ function GroupGrants({ name }: GroupGrantsProps): JSX.Element {
           <table className="list access-list">
             <thead>
               <tr>
-                <th scope="col">{t("access.grants.what")}</th>
-                <th scope="col">{t("access.grants.on")}</th>
-                <th scope="col">{t("access.grants.grantedAt")}</th>
+                <SortHeader {...sorting.header("what")}>{t("access.grants.what")}</SortHeader>
+                <SortHeader {...sorting.header("on")}>{t("access.grants.on")}</SortHeader>
+                <SortHeader {...sorting.header("granted")}>
+                  {t("access.grants.grantedAt")}
+                </SortHeader>
               </tr>
             </thead>
             <tbody>
@@ -211,6 +232,7 @@ interface MemberRowsProps {
  */
 function MemberRows({ name, members, writable, onRemove }: MemberRowsProps): JSX.Element {
   const { t } = useTranslation();
+  const sorting = useListSort(MEMBER_SORTS);
   return (
     <div
       className="list-scroll members-scroll"
@@ -223,14 +245,14 @@ function MemberRows({ name, members, writable, onRemove }: MemberRowsProps): JSX
       <table className="list access-list">
         <thead>
           <tr>
-            <th scope="col">{t("list.name")}</th>
+            <SortHeader {...sorting.header("name")}>{t("list.name")}</SortHeader>
             <th scope="col">
               <span className="visually-hidden">{t("list.actions")}</span>
             </th>
           </tr>
         </thead>
         <tbody>
-          {members.map((member) => (
+          {sortRows(members, sorting.sort, { name: (member) => member.name }).map((member) => (
             <tr key={member.name}>
               <td>
                 <div className="person-cell">

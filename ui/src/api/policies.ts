@@ -6,6 +6,7 @@
 import { api } from "./client";
 import type { GrantWho } from "./grants";
 import type { CursorPage } from "./manage";
+import { type ListSortChoice, setSort } from "./sorting";
 import { guarded } from "./stepUpFirst";
 import type { ColumnMaskOut, RowFilterOut } from "./table";
 
@@ -69,6 +70,7 @@ export function policyQuery(filter: PolicyFilter, limit: number): URLSearchParam
  * @param filter - The filter.
  * @param cursor - The cursor of the page; null for the first.
  * @param limit - The page size.
+ * @param sort - The sort; null for the newest first.
  * @returns The page and the cursor of the next one.
  */
 async function listPolicyPage<T>(
@@ -76,8 +78,10 @@ async function listPolicyPage<T>(
   filter: PolicyFilter,
   cursor: string | null,
   limit: number,
+  sort: ListSortChoice | null,
 ): Promise<CursorPage<T>> {
   const query = policyQuery(filter, limit);
+  setSort(query, sort);
   if (cursor !== null) {
     query.set("cursor", cursor);
   }
@@ -86,11 +90,12 @@ async function listPolicyPage<T>(
 }
 
 /**
- * Lists one page of row filters, newest first. Needs `MANAGE_POLICY` on the instance.
+ * Lists one page of row filters, newest first or in a sort. Needs `MANAGE_POLICY` on the instance.
  *
  * @param filter - The filter.
  * @param cursor - The cursor of the page; null for the first.
  * @param limit - The page size.
+ * @param sort - The sort; null for the newest first.
  * @returns The page and the cursor of the next one.
  * @throws {ApiError} for a refusal, such as 404 for an unknown principal or group.
  */
@@ -98,16 +103,18 @@ export function listRowFilterPage(
   filter: PolicyFilter,
   cursor: string | null,
   limit = POLICIES_PAGE,
+  sort: ListSortChoice | null = null,
 ): Promise<CursorPage<RowFilterOut>> {
-  return listPolicyPage<RowFilterOut>("/api/v1/row-filters", filter, cursor, limit);
+  return listPolicyPage<RowFilterOut>("/api/v1/row-filters", filter, cursor, limit, sort);
 }
 
 /**
- * Lists one page of column masks, newest first. Needs `MANAGE_POLICY` on the instance.
+ * Lists one page of column masks, newest first or in a sort. Needs `MANAGE_POLICY` on the instance.
  *
  * @param filter - The filter.
  * @param cursor - The cursor of the page; null for the first.
  * @param limit - The page size.
+ * @param sort - The sort; null for the newest first.
  * @returns The page and the cursor of the next one.
  * @throws {ApiError} for a refusal, such as 404 for an unknown principal or group.
  */
@@ -115,8 +122,9 @@ export function listColumnMaskPage(
   filter: PolicyFilter,
   cursor: string | null,
   limit = POLICIES_PAGE,
+  sort: ListSortChoice | null = null,
 ): Promise<CursorPage<ColumnMaskOut>> {
-  return listPolicyPage<ColumnMaskOut>("/api/v1/column-masks", filter, cursor, limit);
+  return listPolicyPage<ColumnMaskOut>("/api/v1/column-masks", filter, cursor, limit, sort);
 }
 
 /** A new row filter, as `POST /api/v1/row-filters` takes it. */

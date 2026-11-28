@@ -12,6 +12,7 @@ import {
 } from "../test/access";
 import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
+import { expectServerSorts, sortBy, sortState } from "../test/sorting";
 import type { FakeAnswer, FakeRoute } from "../test/server";
 import { fakeWebAuthn } from "../test/webauthn";
 
@@ -413,5 +414,25 @@ describe("GrantsPage", () => {
       expect(server.sent.some((request) => request.method === "DELETE")).toBe(true);
     });
     expect(server.sent.some((request) => request.path.includes("override_managed"))).toBe(false);
+  });
+});
+
+describe("GrantsPage's sort", () => {
+  it("sorts by who, what, where and when on the server and keeps the order in the address", async () => {
+    const { user, server, router } = renderShell(PATH, { routes: grantRoutes() });
+    const region = await screen.findByRole("region", { name: "Grants" });
+    expect(sortState(region, "Granted")).toBe("descending");
+
+    await expectServerSorts(user, region, server.sent, "/api/v1/grants", [
+      ["Who", "sort=who&order=asc"],
+      ["What", "sort=what&order=asc"],
+      ["On", "sort=on&order=asc"],
+      ["On", "sort=on&order=desc"],
+    ]);
+    expect(router.state.location.search).toBe("?sort=on&order=desc");
+    await sortBy(user, region, "Granted");
+    await waitFor(() => {
+      expect(listReads(server.sent).at(-1)).not.toContain("sort=");
+    });
   });
 });

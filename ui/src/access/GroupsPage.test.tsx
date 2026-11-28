@@ -5,6 +5,7 @@ import { areasFor } from "../shell/areas";
 import { accessStatusRoute } from "../test/access";
 import { held } from "../test/pending";
 import { renderShell } from "../test/render";
+import { expectServerSorts, sortState } from "../test/sorting";
 import type { FakeRoute } from "../test/server";
 
 const PATH = "/settings/access/groups";
@@ -290,5 +291,19 @@ describe("GroupsPage", () => {
       await screen.findByRole("heading", { level: 1, name: "You cannot use Groups" }),
     ).toBeInTheDocument();
     expect(server.sent.filter((request) => request.path.startsWith("/api/v1/groups"))).toEqual([]);
+  });
+});
+
+describe("GroupsPage's sort", () => {
+  it("sorts by name on the server, both ways, and keeps the order in the address", async () => {
+    const { user, server, router } = renderShell(PATH, { routes: groupRoutes() });
+    const region = await screen.findByRole("region", { name: "Groups" });
+    expect(sortState(region, "Name")).toBeNull();
+
+    await expectServerSorts(user, region, server.sent, "/api/v1/groups", [
+      ["Name", "sort=name&order=asc"],
+      ["Name", "sort=name&order=desc"],
+    ]);
+    expect(router.state.location.search).toBe("?sort=name&order=desc");
   });
 });

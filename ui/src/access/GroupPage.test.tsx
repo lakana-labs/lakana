@@ -11,6 +11,7 @@ import {
 } from "../test/access";
 import { held } from "../test/pending";
 import { renderShell } from "../test/render";
+import { expectServerSorts, sortBy, sortState } from "../test/sorting";
 import type { FakeRoute } from "../test/server";
 import { fakeWebAuthn } from "../test/webauthn";
 
@@ -461,5 +462,33 @@ describe("GroupPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { level: 1, name: "analysts" })).toHaveFocus();
     });
+  });
+});
+
+describe("GroupPage's sorts", () => {
+  it("sorts the members by name in the browser and the grants on the server", async () => {
+    const { user, server, router } = renderShell(PATH, { routes: groupRoutes() });
+    const members = await screen.findByRole("region", { name: "Members of analysts" });
+    const names = (): string[] =>
+      within(members)
+        .getAllByRole("link")
+        .map((link) => link.textContent);
+    expect(names()).toEqual(["ci-bot", "maria"]);
+    expect(sortState(members, "Name")).toBe("ascending");
+    await sortBy(user, members, "Name");
+    expect(names()).toEqual(["maria", "ci-bot"]);
+    expect(router.state.location.search).toBe("?membersSort=name&membersOrder=desc");
+
+    const grants = await screen.findByRole("region", { name: "Grants of analysts" });
+    await expectServerSorts(user, grants, server.sent, "/api/v1/grants", [
+      ["What", "sort=what&order=asc"],
+      ["On", "sort=on&order=asc"],
+    ]);
+    // Granted is the grants' own order, the newest first; pressed again, the oldest first.
+    await sortBy(user, grants, "Granted");
+    await expectServerSorts(user, grants, server.sent, "/api/v1/grants", [
+      ["Granted", "sort=granted&order=asc"],
+    ]);
+    expect(router.state.location.search).toContain("grantsSort=granted&grantsOrder=asc");
   });
 });

@@ -8,6 +8,7 @@
  */
 import { api } from "./client";
 import type { CursorPage } from "./manage";
+import { type ListSortChoice, setSort } from "./sorting";
 import { guarded } from "./stepUpFirst";
 
 /** A personal token, as the token lists answer it; never its secret. */
@@ -80,15 +81,21 @@ function tokensApiPath(owner: string, keyId?: string): string {
  *
  * @param filter - The filter's name and value; a null value leaves it out.
  * @param cursor - The cursor of the page; null for the first.
+ * @param sort - The sort; null for the newest first.
  * @returns The query, without its `?`.
  */
-function pageQuery(filter: readonly [string, string | null], cursor: string | null): string {
+function pageQuery(
+  filter: readonly [string, string | null],
+  cursor: string | null,
+  sort: ListSortChoice | null,
+): string {
   const params = new URLSearchParams();
   const [name, value] = filter;
   if (value !== null) {
     params.set(name, value);
   }
   params.set("limit", String(TOKENS_PAGE));
+  setSort(params, sort);
   if (cursor !== null) {
     params.set("cursor", cursor);
   }
@@ -134,14 +141,16 @@ export async function revokeToken(owner: string, keyId: string): Promise<void> {
  *
  * @param owner - Only this principal's; null for everyone's.
  * @param cursor - The cursor of the page; null for the first.
+ * @param sort - The sort; null for the newest first.
  * @returns The page and the cursor of the next one.
  * @throws {ApiError} for a refusal, such as 404 for an unknown owner.
  */
 export async function listAllTokens(
   owner: string | null,
   cursor: string | null,
+  sort: ListSortChoice | null = null,
 ): Promise<CursorPage<TokenOut>> {
-  const page = await api.page(`/api/v1/tokens?${pageQuery(["owner", owner], cursor)}`);
+  const page = await api.page(`/api/v1/tokens?${pageQuery(["owner", owner], cursor, sort)}`);
   return { items: page.body as readonly TokenOut[], nextCursor: page.nextCursor };
 }
 
@@ -150,15 +159,17 @@ export async function listAllTokens(
  *
  * @param environment - Only this environment's; null for every environment's.
  * @param cursor - The cursor of the page; null for the first.
+ * @param sort - The sort; null for the newest first.
  * @returns The page and the cursor of the next one.
  * @throws {ApiError} for a refusal.
  */
 export async function listTaskTokens(
   environment: string | null,
   cursor: string | null,
+  sort: ListSortChoice | null = null,
 ): Promise<CursorPage<TaskTokenOut>> {
   const page = await api.page(
-    `/api/v1/task-tokens?${pageQuery(["environment", environment], cursor)}`,
+    `/api/v1/task-tokens?${pageQuery(["environment", environment], cursor, sort)}`,
   );
   return { items: page.body as readonly TaskTokenOut[], nextCursor: page.nextCursor };
 }
