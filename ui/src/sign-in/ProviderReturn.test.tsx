@@ -107,7 +107,10 @@ const SIGNED_OUT = signedIn({ state: "signed-out", session: undefined });
 
 const REASONS: readonly (readonly [string, RegExp])[] = [
   ["not_linked", /Ask an administrator for an invite\.$/],
-  ["deactivated", /deactivated, so you can no longer sign in\. If this is a mistake, ask an administrator for a new account\.$/],
+  [
+    "deactivated",
+    /deactivated, so you can no longer sign in\. If this is a mistake, ask an administrator for a new account\.$/,
+  ],
   ["provider_unreachable", /^Lakana could not reach the identity provider\. Try again/],
   ["provider_refused", /did not sign you in\. Try again, or ask your IT department\.$/],
   ["token_invalid", /Try again; if it keeps happening, tell an administrator\.$/],
