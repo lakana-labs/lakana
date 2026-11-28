@@ -118,13 +118,15 @@ GCS, Azure and HTTPS (#26), PostgreSQL, SQLite, MariaDB and MySQL (#27) and REST
 OAuth2 (#28); assets replace, append or merge. `lakana load` loads a local file into bronze
 (#29), and `lakana init --template` starts a project from a tested asset for files, SQL or REST,
 with a recipe for SQL Server (#56), or from a whole star schema, `--template medallion` (#254).
-The next elements are M8d data modelling, M7 web interface and sign-in, M8, M8b, M8c, M9, M10
-and the release candidates that lead to v1.0.0.
+M8d, data modelling (#249), shipped with 0.22.0 (see the
+[notes for 0.22.0](upgrades.md#notes-for-0220)), and M7, the web interface and sign-in, with 0.23.0
+(see the [notes for 0.23.0](upgrades.md#notes-for-0230)). The next elements are M8, M8b, M8c, M9,
+M10 and the release candidates that lead to v1.0.0.
 
 ## To v1.0.0
 
-The order up to v1.0.0 is: M6 ingestion (built), M8d data modelling, M7 web interface and
-sign-in, M8, M8b, M8c, M9, M10, and then the release candidates. There is no public beta: the 0.x
+The order up to v1.0.0 is: M6 ingestion (built), M8d data modelling (built), M7 web interface
+and sign-in (built), M8, M8b, M8c, M9, M10, and then the release candidates. There is no public beta: the 0.x
 releases are on PyPI for anyone to try, but Lakana has no active users yet, so a beta would add
 nothing. Development stays on 0.x until v1.0.0.
 Dates follow the plan. The reasons: the first audience, teams without a senior data engineer, needs
@@ -165,7 +167,7 @@ ingestion helpers and named connections shipped before the web interface.
    `lakana load`: the Compose smoke test runs the three templates on a schedule against a file
    directory, a PostgreSQL database and a REST API outside the stack, and every helper has a
    tested recipe.
-5. **M8d, data modelling (epic #249).** Decided on 2026-10-20; on 2026-10-24 it moved before the
+5. **M8d, data modelling (built, 0.22.0; epic #249).** Decided on 2026-10-20; on 2026-10-24 it moved before the
     web interface, after M6 and before M7. Opinionated support for medallion layers (bronze, silver,
     gold) and Kimball-lite star schemas, with optional wide tables. The parts: model metadata in the
     asset header (#250); translated labels and descriptions with a main language (#251); layer
@@ -175,17 +177,18 @@ ingestion helpers and named connections shipped before the web interface.
     graph, with lineage, impact and join-path queries (#374), and a business glossary of terms
     linked to tables, columns and measures (#375). Done when a new team can start from the template,
     build a star schema with a history dimension, and see its layers and labels in the catalog.
-6. **M7, web interface and sign-in.** Comes after M8d, so the interface shows model metadata
-   (kind, grain, key, references, layers and labels) from its first version. A web
+6. **M7, web interface and sign-in (built, 0.23.0).** Comes after M8d, so the interface shows model
+   metadata (kind, grain, key, references, layers and labels) from its first version. A web
    interface with OIDC sign-in, or an invite link and a passkey for teams without an identity
-   provider. It shows the catalog, lineage, runs with logs and check results and deploys, and has
-   a one-query SQL editor, administration of users, groups, grants, tokens and connections,
-   loading a file, and a first-run tour. No file browser, dashboards or notebooks. The Compose
-   bundle can set up a TLS proxy, because passkeys need HTTPS. Done when a new user can sign in and answer a question
-   without the CLI. A second security review is due when the interface and sign-in arrive. M7 is designed first (#66): a spec and its slices come before any screen, built around what the
-   first audience needs. After M7 comes the rest of the plan; the release candidates test the
-   interface with real teams before v1.0.0. The web interface is under way and off by default:
-   sign-in, Home, the Catalog, and the first parts of Access and Settings exist.
+   provider. It shows the catalog, lineage, runs with logs and check results and deploys, and has a
+   one-query SQL editor, administration of users, groups, grants, tokens and connections, loading a
+   file, and a first-run tour. No file browser, dashboards or notebooks. The Compose bundle can set
+   up a TLS proxy, because passkeys need HTTPS. Done when a new user can sign in and answer a
+   question without the CLI. The interface and sign-in are reviewed for security with the rest of
+   Lakana in M10. M7 is designed first (#66): a spec and its slices come before any screen, built
+   around what the first audience needs. After M7 comes the rest of the plan; the release candidates
+   test the interface with real teams before v1.0.0. The web interface ships with 0.23.0 and is off
+   by default (`LAKANA_UI__ENABLED`).
 7. **M8, ML.** Experiment tracking, the model registry, and the offline feature store, all
     queryable and tied to commits. The registry is the artifact store of M5c2b. It adds named
     pointers such as `production`, pinned versions that a consumer can name, and metrics on a
