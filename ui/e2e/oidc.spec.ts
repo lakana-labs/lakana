@@ -273,7 +273,8 @@ for (const theme of ["light", "dark"] as const) {
       await expect(section).toContainText(/Your API tokens work until .*2026/);
       const passkeys = page.getByRole("region", { name: "Passkeys" });
       await expect(passkeys).toContainText("ThinkPad fingerprint");
-      await expect(passkeys.getByRole("button")).toHaveCount(0);
+      // No Remove: the headers that sort are the only buttons.
+      await expect(passkeys.locator("tbody").getByRole("button")).toHaveCount(0);
       expect(await violations(page)).toEqual([]);
       expect(unstubbed(world)).toEqual([]);
       expect(unexpected(errors)).toEqual([]);

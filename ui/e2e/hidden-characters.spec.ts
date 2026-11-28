@@ -1056,7 +1056,7 @@ walk(
     const env = n("prod");
     await visit(page, `/jobs/deploys?environment=${env}`, ["analytics", "admin", "ana.nowak"]);
     await expect(page.getByText(DEPLOY_FAILURE, { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: /Repository/ }).click();
+    await page.getByRole("button", { name: /Repository/, expanded: false }).click();
     await expect(page.getByRole("listbox")).toBeVisible();
     await expectNoRaw(page, "the open Repository menu");
     await page.keyboard.press("Escape");
