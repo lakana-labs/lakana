@@ -189,10 +189,11 @@ function byCodePoint(a: string, b: string): number {
  * @returns Below zero, zero or above zero.
  */
 function compareValues(left: string | number, right: string | number): number {
-  if (typeof left === "string" && typeof right === "string") {
-    return byCodePoint(foldAscii(left), foldAscii(right));
+  // One column holds values of one kind: a name with a name, a number with a number.
+  if (typeof left === "string") {
+    return byCodePoint(foldAscii(left), foldAscii(String(right)));
   }
-  return left < right ? -1 : left > right ? 1 : 0;
+  return left - Number(right);
 }
 
 /**

@@ -137,12 +137,19 @@ describe("a list sorted in the browser", () => {
   });
 
   it("folds only A to Z and then compares code points, as the server sorts names", () => {
-    const names = ["Ärger", "zebra", "\u{1D538}x", "\uFF21", "ärger", "Zulu", "ZEB"].map(
-      (name) => ({
-        name,
-        size: null,
-      }),
-    );
+    const names = [
+      "Ärger",
+      "zebra",
+      "\u{1D538}x",
+      "\uFF21",
+      "ärger",
+      "Zulu",
+      "ZEB",
+      "\u{1D538}a",
+    ].map((name) => ({
+      name,
+      size: null,
+    }));
     expect(sortRows(names, { field: "name", order: "asc" }, keys).map((row) => row.name)).toEqual([
       "ZEB",
       "zebra",
@@ -150,8 +157,16 @@ describe("a list sorted in the browser", () => {
       "Ärger",
       "ärger",
       "\uFF21",
+      "\u{1D538}a",
       "\u{1D538}x",
     ]);
+  });
+
+  it("keeps the list's own order among the rows without a value", () => {
+    const twoNone = [...rows, { name: "epsilon", size: null }];
+    expect(
+      sortRows(twoNone, { field: "size", order: "desc" }, keys).map((row) => row.name),
+    ).toEqual(["gamma", "alpha", "delta", "Beta", "epsilon"]);
   });
 
   it("keeps the list's own order when no column is sorted", () => {
