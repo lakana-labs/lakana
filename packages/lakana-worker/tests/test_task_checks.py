@@ -945,8 +945,8 @@ def test_a_deactivated_principal_after_the_write_makes_every_check_errored(
     run_claimed(_engine(world), claimed)
 
     error = (
-        "the run's principal is deactivated, so the check was not run. Activate the principal, "
-        "or bind an active one to the deployment."
+        "the run's principal is deactivated, so the check was not run. Bind an active principal "
+        "to the deployment."
     )
     task = _task(world, "silver.orders")
     assert seen == []

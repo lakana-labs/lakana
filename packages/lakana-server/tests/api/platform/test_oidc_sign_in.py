@@ -1020,7 +1020,12 @@ def test_same_email_on_another_account_does_not_match(
 def test_deactivated_person_is_refused(client: TestClient, fake: FakeProvider) -> None:
     _link(client, "alice", is_active=False)
     _signed_in_at_provider(client, fake)
-    _refused(client.post(FINISH, json={}), "deactivated")
+    r = client.post(FINISH, json={})
+    _refused(r, "deactivated")
+    assert r.json()["detail"] == (
+        "Your Lakana account is deactivated, so you can no longer sign in. If this is a "
+        "mistake, ask an administrator for a new account."
+    )
     assert [e["reason"] for e in _events(client, AuditEventType.SIGN_IN_OIDC_REFUSED)] == [
         "deactivated"
     ]

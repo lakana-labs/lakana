@@ -64,6 +64,14 @@ describe("endedReason", () => {
     );
   });
 
+  it("says that a deactivated account stays deactivated", () => {
+    expect(
+      endedReason(t, new ApiError(401, "SessionEndedError", "x", { reason: "deactivated" })),
+    ).toBe(
+      "Your Lakana account is deactivated, so your session ended and you can no longer sign in. If this is a mistake, ask an administrator for a new account.",
+    );
+  });
+
   it("says a token's session ended outside the token window, and after an unlink", () => {
     expect(
       endedReason(t, new ApiError(401, "SessionEndedError", "x", { reason: "token_window" })),

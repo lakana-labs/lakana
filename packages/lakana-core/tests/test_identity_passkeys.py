@@ -854,6 +854,10 @@ def test_sign_in_refused_for_a_deactivated_person(
     with pytest.raises(AuthenticationError, match="deactivated") as refused:
         world.sign_in(auth)
     assert "alice" not in str(refused.value)
+    assert str(refused.value) == (
+        "The account of this passkey is deactivated, so it can no longer sign in. If this is a "
+        "mistake, ask an administrator for a new account."
+    )
 
 
 def test_unknown_passkey_is_refused(world: World) -> None:
