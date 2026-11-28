@@ -14,6 +14,9 @@
   the server into a request generator.
 - When a refresh fails, the last good document and keys stay usable for `STALE_SECONDS` past
   their freshness; after that every lookup fails closed.
+- `JwksCache.current_discovery`, asked before a browser is sent to the provider, wants more: the
+  latest fetch must have worked. It fetches again once that fetch is `REFRESH_INTERVAL_SECONDS`
+  old, the same bound as every refresh, so it adds no request beyond one per interval.
 - Only RSA signing keys are kept: an entry with another key type, ``use`` other than ``sig``,
   a private part or a malformed modulus is left out. Two keys with one ``kid`` make the whole set
   unusable. The key size is checked when a key is used (`SigningKey.bits`).
@@ -516,3 +519,41 @@ class JwksCache:
             `KEYS_UNAVAILABLE` when there is no usable document.
         """
         return self._snapshot(issuer, lambda _: True).document
+
+    def current_discovery(self, issuer: str) -> Mapping[str, object]:
+        """Return an issuer's discovery document only while the issuer answers.
+
+        Before a browser is sent to the provider, a document from the cache is not enough: the
+        provider may have gone down since. The document and keys are fetched again once the
+        latest fetch is `REFRESH_INTERVAL_SECONDS` old (at most one fetch per interval, as for
+        every refresh); the document is returned only if that fetch, or the latest one within
+        the interval, worked. A failure keeps the last good document for `discovery` and the
+        keys for `signing_key`.
+
+        Parameters
+        ----------
+        issuer
+            The issuer URL, exactly as configured.
+
+        Returns
+        -------
+        Mapping[str, object]
+            The document of the latest fetch.
+
+        Raises
+        ------
+        IdTokenRefused
+            `ISSUER_NOT_ALLOWED` for an issuer that is not configured (nothing is fetched),
+            `KEYS_UNAVAILABLE` when the latest fetch failed.
+        """
+        state = self._issuers.get(issuer)
+        if state is None:
+            raise self._refusal(RefusalCode.ISSUER_NOT_ALLOWED)
+        with state.refreshing:
+            now = self._clock()
+            if state.attempted_at is None or now - state.attempted_at >= REFRESH_INTERVAL_SECONDS:
+                self._refresh(state, now)
+            snapshot = state.snapshot
+            if snapshot is None or snapshot.fetched_at != state.attempted_at:
+                raise self._refusal(RefusalCode.KEYS_UNAVAILABLE)
+            return snapshot.document

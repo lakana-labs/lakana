@@ -24,7 +24,13 @@ from pydantic import SecretStr
 from lakana_core.net.https_json import FetchFailed
 from lakana_core.oidc import keys
 from lakana_core.oidc.errors import IdTokenRefused, RefusalCode
-from lakana_core.oidc.keys import FRESH_SECONDS, STALE_SECONDS, JwksCache, KeySource
+from lakana_core.oidc.keys import (
+    FRESH_SECONDS,
+    REFRESH_INTERVAL_SECONDS,
+    STALE_SECONDS,
+    JwksCache,
+    KeySource,
+)
 
 
 class Clock:
@@ -111,6 +117,41 @@ def test_stale_discovery_serves_while_refreshes_fail() -> None:
     with pytest.raises(IdTokenRefused) as info:
         cache.discovery(ISSUER)
     assert info.value.code is RefusalCode.KEYS_UNAVAILABLE
+
+
+def test_current_discovery_needs_the_latest_fetch_to_have_worked() -> None:
+    """Before sending a browser to the provider, a cached document is not enough (#854)."""
+    fetcher, clock = published(), Clock()
+    cache = JwksCache(source(), fetcher=fetcher, clock=clock)
+    first = cache.current_discovery(ISSUER)
+    clock.now += REFRESH_INTERVAL_SECONDS - 1
+    assert cache.current_discovery(ISSUER) == first
+    assert [url for url, _ in fetcher.calls] == [DISCOVERY, JWKS_URI]
+    fetcher.documents[DISCOVERY] = FetchFailed("offline")
+    clock.now += 1
+    with pytest.raises(IdTokenRefused) as info:
+        cache.current_discovery(ISSUER)
+    assert info.value.code is RefusalCode.KEYS_UNAVAILABLE
+    # The failure is remembered for the interval: nothing is fetched again meanwhile.
+    calls = len(fetcher.calls)
+    clock.now += REFRESH_INTERVAL_SECONDS - 1
+    with pytest.raises(IdTokenRefused):
+        cache.current_discovery(ISSUER)
+    assert len(fetcher.calls) == calls
+    # A token check and a callback keep the last good document.
+    assert cache.discovery(ISSUER) == first
+    fetcher.documents[DISCOVERY] = {**discovery(), "token_endpoint": f"{ISSUER}/token"}
+    clock.now += 1
+    assert cache.current_discovery(ISSUER) == first
+
+
+def test_current_discovery_of_another_issuer_fetches_nothing() -> None:
+    fetcher = published()
+    cache = JwksCache(source(), fetcher=fetcher)
+    with pytest.raises(IdTokenRefused) as info:
+        cache.current_discovery("https://evil.example")
+    assert info.value.code is RefusalCode.ISSUER_NOT_ALLOWED
+    assert fetcher.calls == []
 
 
 def test_discovery_of_another_issuer_fetches_nothing() -> None:
