@@ -1619,12 +1619,12 @@ def test_jobs_sort_by_each_field_with_the_unknown_last() -> None:
     ]
     with pytest.raises(
         ValidationError,
-        match="`sort` must be one of: environment, last_run, name, next_run, repository, schedule",
+        match="`sort` must be one of: environment, last_run, name, next_run, repository, status",
     ):
         sorted_jobs(jobs, "trigger", None)
 
 
-def test_jobs_sort_by_repository_environment_and_schedule() -> None:
+def test_jobs_sort_by_repository_and_environment_and_not_by_schedule() -> None:
     nightly = _job_view("nightly", "Shop", cron="0 2 * * *", timezone="UTC", environment="prod")
     hourly = _job_view("hourly", "analytics", cron="0 * * * *", timezone="Europe/Berlin")
     by_hand = _job_view("backfill", "ml", environment="Dev2")
@@ -1650,8 +1650,9 @@ def test_jobs_sort_by_repository_environment_and_schedule() -> None:
     assert names("repository") == ["hourly", "backfill", "nightly"]
     assert names("repository", "desc") == ["nightly", "backfill", "hourly"]
     assert names("environment") == ["hourly", "backfill", "nightly"]
-    assert names("schedule") == ["hourly", "nightly", "backfill"]
-    assert names("schedule", "desc") == ["nightly", "hourly", "backfill"]
+    # Cron text has no order that means something: the schedule does not sort.
+    with pytest.raises(ValidationError, match="got 'schedule'"):
+        sorted_jobs(jobs, "schedule", None)
 
 
 def test_list_takes_the_sort(

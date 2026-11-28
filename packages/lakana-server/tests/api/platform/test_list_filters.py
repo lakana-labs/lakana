@@ -277,9 +277,7 @@ _SORTABLE = {
     "/api/v1/runs": "created, duration, environment, name, status, tasks, trigger",
     _DEPLOYS: "created, kind, repository, status, who",
     "/api/v1/deploys": "created, kind, repository, status, who",
-    "/api/v1/environments/dev/jobs": (
-        "environment, last_run, name, next_run, repository, schedule, status"
-    ),
+    "/api/v1/environments/dev/jobs": ("environment, last_run, name, next_run, repository, status"),
     "/api/v1/environments/dev/connections": "created, environment, kind, name, status",
     "/api/v1/connections": "created, environment, kind, name, status",
     "/api/v1/environments/dev/saved-queries": "created, name, updated",

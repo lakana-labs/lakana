@@ -192,7 +192,7 @@ def list_jobs(
         str | None,
         sort_option(
             "name, status (the last run's), last_run (latest first), next_run (soonest "
-            "first), repository, environment or schedule; a job without one comes last. "
+            "first), repository or environment; a job without one comes last. "
             "Without it, by repository, then name"
         ),
     ] = None,

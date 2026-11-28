@@ -319,10 +319,9 @@ JOB_SORTS: dict[str, bool] = {
     "next_run": False,
     "repository": False,
     "environment": False,
-    "schedule": False,
 }
 """The fields the jobs list sorts by, each with whether it runs from the largest down by default:
-names, repositories, environments, schedules and the last run's state from A, the latest last
+names, repositories, environments and the last run's state from A, the latest last
 run first, the soonest next run first."""
 
 
@@ -338,9 +337,9 @@ def sorted_jobs(views: Sequence[JobView], sort: str | None, order: str | None) -
         The jobs, in the list's own order.
     sort
         ``name``, ``status`` (the last run's state), ``last_run``, ``next_run``,
-        ``repository``, ``environment`` or ``schedule`` (the cron expression as written, then
-        its time zone; a job run by hand last); with `order` also `None`, the list's own order:
-        by repository, then name.
+        ``repository`` or ``environment``; with `order` also `None`, the list's own order: by
+        repository, then name. A schedule does not sort: cron text has no order that means
+        something.
     order
         ``asc`` or ``desc``; by default ``desc`` for ``last_run``, ``asc`` for the others.
 
@@ -366,12 +365,11 @@ def sorted_jobs(views: Sequence[JobView], sort: str | None, order: str | None) -
         "next_run": lambda v: v.next_run_at,
         "repository": lambda v: v.repository.casefold(),
         "environment": lambda v: v.environment.casefold(),
-        "schedule": lambda v: None if v.cron is None else (v.cron, v.timezone or ""),
     }[chosen.field]
     known = [v for v in ties if value_of(v) is not None]
     unknown = [v for v in ties if value_of(v) is None]
     # A sort is stable, also in reverse: equal values keep the order of `ties`.
-    # The values of one field are of one type, which compares: names, times or schedules.
+    # The values of one field are of one type, which compares: names or times.
     by_value = cast("Callable[[JobView], str]", value_of)
     return [*sorted(known, key=by_value, reverse=chosen.descending), *unknown]
 

@@ -34,14 +34,11 @@ import { useJobsOf } from "./useJobsOf";
 const SCHEDULE_HOW_TO = `${HOW_TO_URL}run-a-job-on-a-schedule/`;
 
 /** The columns the jobs sort by: by name unless the address says otherwise. */
-const JOB_SORTS: ListSortSpec<
-  "name" | "repository" | "environment" | "schedule" | "last_run" | "next_run"
-> = {
+const JOB_SORTS: ListSortSpec<"name" | "repository" | "environment" | "last_run" | "next_run"> = {
   fields: {
     name: "asc",
     repository: "asc",
     environment: "asc",
-    schedule: "asc",
     last_run: "desc",
     next_run: "asc",
   },
@@ -231,7 +228,8 @@ export function AllJobs({
           <SortHeader {...sorting.header("environment")}>
             {t("jobs.list.columns.environment")}
           </SortHeader>
-          <SortHeader {...sorting.header("schedule")}>{t("jobs.list.columns.schedule")}</SortHeader>
+          {/* Cron text has no order that means something: the schedule does not sort. */}
+          <th scope="col">{t("jobs.list.columns.schedule")}</th>
           <SortHeader {...sorting.header("last_run")}>{t("jobs.list.columns.lastRun")}</SortHeader>
           <SortHeader {...sorting.header("next_run")}>{t("jobs.list.columns.nextRun")}</SortHeader>
         </>

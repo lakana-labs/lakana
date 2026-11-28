@@ -79,8 +79,6 @@ const SORT_VALUES: Readonly<Record<string, (job: JobOut) => string | number | nu
   status: (job) => job.last_run_status,
   repository: (job) => job.repository.toLowerCase(),
   environment: (job) => job.environment.toLowerCase(),
-  // As the server sorts it: the cron expression as written, then its zone; by hand last.
-  schedule: (job) => (job.cron === null ? null : `${job.cron}\u0000${job.timezone ?? ""}`),
   last_run: (job) => instant(job.last_run_at),
   next_run: (job) => instant(job.next_run_at),
 };

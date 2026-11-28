@@ -53,7 +53,7 @@ describe("jobOrder", () => {
     ).toEqual(["later", "whole"]);
   });
 
-  it("orders by repository, environment and schedule, a job run by hand last", () => {
+  it("orders by repository and environment", () => {
     const shop = aJob({ name: "a", repository: "Shop", environment: "prod", cron: "0 2 * * *" });
     const books = aJob({ name: "b", repository: "books", environment: "dev", cron: null });
     const hourly = aJob({
@@ -68,7 +68,5 @@ describe("jobOrder", () => {
       [...jobs].sort(jobOrder({ sort, order })).map((job) => job.name);
     expect(by("repository")).toEqual(["b", "c", "a"]);
     expect(by("environment")).toEqual(["b", "c", "a"]);
-    expect(by("schedule")).toEqual(["c", "a", "b"]);
-    expect(by("schedule", "desc")).toEqual(["a", "c", "b"]);
   });
 });

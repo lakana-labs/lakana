@@ -19,7 +19,7 @@ List the jobs of the deployed projects: state, triggers, next run and last run.
 |---|---|---|---|
 | `--env` | text | none | Environment (default: the profile's). |
 | `--repo` | text | none | Repository name (default: lakana.yaml's repo:). |
-| `--sort` | text | none | What to sort by: name, status (the last run's), last_run (latest first), next_run (soonest first), repository, environment or schedule; a job without one comes last. Without it, by repository, then name. |
+| `--sort` | text | none | What to sort by: name, status (the last run's), last_run (latest first), next_run (soonest first), repository or environment; a job without one comes last. Without it, by repository, then name. |
 | `--order` | text | none | asc or desc; without it, the direction each --sort field has by default. |
 
 ## `lakana job show`

@@ -110,7 +110,7 @@ name (`grantsSort`, `membersSort`, …).
 |---|---|---|---|
 | Runs, of one environment or every one | `lakana runs list` | `created`, `name` (the job's, else the repository's), `status`, `environment`, `trigger` (what started it; a run started with `lakana run` has none and comes last), `duration` (from its start to its end; while it runs, to the moment the first page was read, the same on every page; one not started last), `tasks` (how many) | `created`, `duration` and `tasks` from the largest; the others from A; runs of one value newest first |
 | Deploys, of one environment or every one | `lakana deploys list` | `created`, `status`, `kind`, `repository`, `who` (whoever asked for it; a deploy whose submitter was deleted last) | `created` newest first; the others from A, deploys of one value newest first |
-| Jobs | `lakana job list` | `name`, `status` (the last run's), `last_run`, `next_run`, `repository`, `environment`, `schedule` (the cron expression as written, then its time zone); by repository, then name, without `--sort` | `last_run` latest first; the others from A or soonest first; a job without a value (never run, no next run, run by hand) last |
+| Jobs | `lakana job list` | `name`, `status` (the last run's), `last_run`, `next_run`, `repository`, `environment`; by repository, then name, without `--sort` | `last_run` latest first; the others from A or soonest first; a job without a value (never run, no next run) last |
 | Connections, of one environment or every one | `lakana connection list` | `created`, `name`, `status` (the last test: failed first, then queued or running, then passed, never tested last), `kind`, `environment` | `created` newest first; the others ascending, one state, kind or environment by name |
 | Saved queries, of one environment or every one | `lakana query saved list` | `name`, `updated`, `created` | `name` from A; the times latest first |
 | Principals (Access › People) | `lakana principal list` | `created`, `name`, `status` (active first, then by name) | `created` newest first; the others ascending |
@@ -130,8 +130,9 @@ an artifact's open uploads (at most 16), and the lists of Settings and of a tabl
 column whose values have no order that means something does not sort: a commit's hash, an
 upload's id, free-text notes, reasons and descriptions, the expression of a row filter or a
 column mask, the details of an audit event, the why of an expiring table, a connection's address
-and how many projects use it, and a health signal's observed value and band. Home's panels and
-the Jobs page's Running now and Failed sections keep their own order: they are the newest few.
+and how many projects use it, a health signal's observed value and band, and a job's schedule
+(cron text has no order that means something). Home's panels and the Jobs page's Running now and
+Failed sections keep their own order: they are the newest few.
 The raw file browser of a place lists what the object store answers, a folder at a time, in the
 store's own order, and does not sort.
 
