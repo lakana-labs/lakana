@@ -174,9 +174,7 @@ describe("Attempts", () => {
     const { rerender } = render(<Attempts asset="silver.orders" attempts={attempts} />, {
       wrapper: MemoryRouter,
     });
-    rerender(<Attempts asset="silver.orders" attempts={[...attempts].reverse()} />, {
-      wrapper: MemoryRouter,
-    });
+    rerender(<Attempts asset="silver.orders" attempts={[...attempts].reverse()} />);
 
     expect(cells(0)[1]).toHaveTextContent("w-9b2c");
     expect(cells(1)[4]).toHaveTextContent("Released");
