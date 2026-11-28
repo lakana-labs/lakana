@@ -177,17 +177,18 @@ ingestion helpers and named connections shipped before the web interface.
     graph, with lineage, impact and join-path queries (#374), and a business glossary of terms
     linked to tables, columns and measures (#375). Done when a new team can start from the template,
     build a star schema with a history dimension, and see its layers and labels in the catalog.
-6. **M7, web interface and sign-in (built, 0.23.0).** Comes after M8d, so the interface shows model metadata
-   (kind, grain, key, references, layers and labels) from its first version. A web
+6. **M7, web interface and sign-in (built, 0.23.0).** Comes after M8d, so the interface shows model
+   metadata (kind, grain, key, references, layers and labels) from its first version. A web
    interface with OIDC sign-in, or an invite link and a passkey for teams without an identity
-   provider. It shows the catalog, lineage, runs with logs and check results and deploys, and has
-   a one-query SQL editor, administration of users, groups, grants, tokens and connections,
-   loading a file, and a first-run tour. No file browser, dashboards or notebooks. The Compose
-   bundle can set up a TLS proxy, because passkeys need HTTPS. Done when a new user can sign in and answer a question
-   without the CLI. A second security review is due when the interface and sign-in arrive. M7 is designed first (#66): a spec and its slices come before any screen, built around what the
-   first audience needs. After M7 comes the rest of the plan; the release candidates test the
-   interface with real teams before v1.0.0. The web interface ships with 0.23.0 and is off by
-   default (`LAKANA_UI__ENABLED`).
+   provider. It shows the catalog, lineage, runs with logs and check results and deploys, and has a
+   one-query SQL editor, administration of users, groups, grants, tokens and connections, loading a
+   file, and a first-run tour. No file browser, dashboards or notebooks. The Compose bundle can set
+   up a TLS proxy, because passkeys need HTTPS. Done when a new user can sign in and answer a
+   question without the CLI. The interface and sign-in are reviewed for security with the rest of
+   Lakana in M10. M7 is designed first (#66): a spec and its slices come before any screen, built
+   around what the first audience needs. After M7 comes the rest of the plan; the release candidates
+   test the interface with real teams before v1.0.0. The web interface ships with 0.23.0 and is off
+   by default (`LAKANA_UI__ENABLED`).
 7. **M8, ML.** Experiment tracking, the model registry, and the offline feature store, all
     queryable and tied to commits. The registry is the artifact store of M5c2b. It adds named
     pointers such as `production`, pinned versions that a consumer can name, and metrics on a
