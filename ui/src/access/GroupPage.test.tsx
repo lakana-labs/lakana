@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -142,6 +142,25 @@ describe("GroupPage", () => {
       "PUT /api/v1/groups/analysts/members/ben",
       "GET /api/v1/groups/analysts/members",
     ]);
+  });
+
+  it("adds a member once, however often the form is sent while it waits", async () => {
+    const answer = held();
+    const { user, server } = renderShell(PATH, {
+      routes: groupRoutes({ "PUT /api/v1/groups/analysts/members/ben": answer.route }),
+    });
+    const field = await screen.findByRole("combobox", { name: "Person or service account" });
+
+    await user.type(field, "ben{Escape}{Enter}");
+    await waitFor(() => {
+      expect(server.sent.filter((request) => request.method === "PUT")).toHaveLength(1);
+    });
+    fireEvent.submit(field.closest("form") as HTMLFormElement);
+    await user.type(field, "{Enter}");
+
+    expect(server.sent.filter((request) => request.method === "PUT")).toHaveLength(1);
+    answer.release({ status: 204 });
+    expect(await screen.findByText("Added ben to analysts.")).toBeInTheDocument();
   });
 
   it("says when no such person exists", async () => {

@@ -178,6 +178,7 @@ the text colour, so only what opens something looks like it does.
 
 **Names are picked, not guessed.** A field that names a person, a service account, a group or a
 table suggests, as you type, the names that exist and that you may see, so a typo shows before you save.
+A click into the empty field (or Arrow Down) lists the first names before you type anything.
 The suggestions are help: what you type is still sent, and the server checks it.
 
 **Every dialog closes from its corner.** A dialog has a × in its top right corner beside its
