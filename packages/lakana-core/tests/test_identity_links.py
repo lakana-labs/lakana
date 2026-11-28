@@ -1101,8 +1101,13 @@ def test_admin_granted_to_a_deactivated_person_counts_as_held(world: World) -> N
     )
     world.session.refresh(bob)
     assert bob.held_admin
-    with pytest.raises(ConflictError, match="deactivated"):
+    with pytest.raises(ConflictError) as refused:
         world.links.issue_recovery(world.pat(boss), principal_name="bob")
+    # A deactivated account stays deactivated (#852): no promise of a reactivation.
+    assert str(refused.value) == (
+        "'bob' is deactivated, and a deactivated account cannot be recovered or reactivated. If "
+        "this is a mistake, invite the person again under another name."
+    )
 
 
 def test_a_person_who_never_held_admin_is_recoverable_by_an_administrator(world: World) -> None:

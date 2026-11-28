@@ -791,8 +791,8 @@ class SessionService:
             )
         if not principal.is_active:
             raise PermissionDenied(
-                f"The account {principal.name!r} is deactivated. Ask an administrator to "
-                "reactivate it."
+                f"The account {principal.name!r} is deactivated, so it can no longer sign in. If "
+                "this is a mistake, ask an administrator for a new account."
             )
         now = self._clock()
         if source_pat_id is not None:

@@ -450,6 +450,10 @@ def test_deactivated_principal_cannot_use_its_session(
     with pytest.raises(SessionEndedError) as e:
         svc.verify(started.cookie_value, extend=True)
     assert e.value.reason == "deactivated"
+    assert str(e.value) == (
+        "Your Lakana account is deactivated, so your session ended and you can no longer sign "
+        "in. If this is a mistake, ask an administrator for a new account."
+    )
 
 
 @pytest.mark.parametrize("how", ["revoked", "expired"])
@@ -499,9 +503,15 @@ def test_service_account_never_gets_a_session(
 ) -> None:
     """A service account or a deactivated person is refused a session."""
     row = _principal(session, "robot", kind=kind, active=active)
-    with pytest.raises(PermissionDenied):
+    with pytest.raises(PermissionDenied) as refused:
         _start(svc, row)
     assert session.execute(select(BrowserSession)).first() is None
+    if not active:
+        # A deactivated account stays deactivated (#852): no promise of a reactivation.
+        assert str(refused.value) == (
+            "The account 'robot' is deactivated, so it can no longer sign in. If this is a "
+            "mistake, ask an administrator for a new account."
+        )
 
 
 def test_start_refuses_an_unknown_principal_and_an_unknown_via(
