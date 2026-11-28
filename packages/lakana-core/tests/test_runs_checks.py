@@ -1595,8 +1595,8 @@ def test_the_fixed_error_texts() -> None:
         "completely. Deploy a new commit of the project: that writes the project version afresh."
     )
     assert ERROR_NO_PRINCIPAL == (
-        "the run's principal is deactivated, so the check was not run. Activate the principal, "
-        "or bind an active one to the deployment."
+        "the run's principal is deactivated, so the check was not run. Bind an active principal "
+        "to the deployment."
     )
     assert error_of_exception(KeyError("Alice Smith")) == (
         "the check could not be counted: the worker hit an unexpected error (KeyError). See the "
