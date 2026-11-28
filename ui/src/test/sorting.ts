@@ -56,20 +56,20 @@ interface SentRequest {
  * sort: a header's first press sends its field in its own direction.
  *
  * @param user - The user-event session.
- * @param scope - What holds the list.
+ * @param scope - What holds the list, or how to find it again when the list draws it anew.
  * @param sent - The requests the fake server was sent, as it records them.
  * @param route - The start of the list's path, such as `/api/v1/grants`.
  * @param columns - Each header's name and the `sort=…&order=…` its press sends.
  */
 export async function expectServerSorts(
   user: UserEvent,
-  scope: HTMLElement,
+  scope: HTMLElement | (() => HTMLElement),
   sent: readonly SentRequest[],
   route: string,
   columns: readonly (readonly [string, string])[],
 ): Promise<void> {
   for (const [column, query] of columns) {
-    await sortBy(user, scope, column);
+    await sortBy(user, typeof scope === "function" ? scope() : scope, column);
     await waitFor(() => {
       const reads = sent.filter((r) => r.method === "GET" && r.path.startsWith(route));
       expect(reads.at(-1)?.path).toContain(query);

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { areasFor } from "../shell/areas";
 import { anEvent, AUDIT_EVENTS, SQL_SHA256 } from "../test/audit";
 import { renderShell } from "../test/render";
+import { expectServerSorts } from "../test/sorting";
 import type { FakeRoute } from "../test/server";
 
 const PATH = "/settings/audit";
@@ -169,6 +170,18 @@ describe("AuditPage", () => {
       expect(reads(server.sent).at(-1)?.get("order")).toBe("asc");
     });
     expect(reads(server.sent).at(-1)?.get("sort")).toBe("occurred");
+  });
+
+  it("sorts by event, who and what it is on, on the server; the details do not sort", async () => {
+    const { server, user } = renderShell(PATH, { routes: answering() });
+    await events();
+    const region = (): HTMLElement => screen.getByRole("region", { name: "Audit events" });
+    expect(within(region()).queryByRole("button", { name: "Details" })).toBeNull();
+    await expectServerSorts(user, region, server.sent, "/api/v1/audit-events", [
+      ["Event", "sort=event&order=asc"],
+      ["Who", "sort=who&order=asc"],
+      ["On", "sort=on&order=asc"],
+    ]);
   });
 
   it("filters by who, event, environment and period, in the address", async () => {

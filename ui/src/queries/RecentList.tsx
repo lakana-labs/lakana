@@ -11,12 +11,25 @@ import { Link } from "react-router";
 import { listMyQueries, RECENT_DAYS } from "../api/queries";
 import { ViewList } from "../catalog/views/ViewList";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
+import type { ListSortSpec } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import { useWhen } from "../shell/useWhen";
 import type { StatusKind } from "../status/status";
 import { StatusLabel } from "../status/StatusLabel";
 import { runPath } from "./paths";
 import { useLibraryPages } from "./useLibraryPages";
 import "./queryStrings";
+
+/**
+ * The columns the Recent list sorts by, on the server. Its own order (running, queued, then the
+ * ended ones newest first) is no column; Saved keeps the plain `sort` of the address.
+ */
+const RECENT_SORTS: ListSortSpec<"created" | "status"> = {
+  fields: { created: "desc", status: "asc" },
+  natural: null,
+  param: "recent",
+};
 
 /** Properties of {@link RecentList}. */
 export interface RecentListProps {
@@ -42,7 +55,17 @@ export interface RecentListProps {
 export function RecentList({ me, filter, reloadKey }: RecentListProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
-  const pages = useLibraryPages(filter, reloadKey, (cursor) => listMyQueries(me, filter, cursor));
+  const sorting = useListSort(RECENT_SORTS);
+  const sort = sorting.choice;
+  // A new sort reads the first page again; the rows stay until it arrives. A query that ends
+  // while the list is paged by state is shown once.
+  const pages = useLibraryPages(
+    filter,
+    reloadKey,
+    (cursor) => listMyQueries(me, filter, cursor, sort),
+    JSON.stringify(sort),
+    (run) => run.id,
+  );
   const rows = pages.items ?? [];
   return (
     <ViewList
@@ -54,8 +77,8 @@ export function RecentList({ me, filter, reloadKey }: RecentListProps): JSX.Elem
       scroll="queries-list-scroll"
       head={
         <tr>
-          <th scope="col">{t("queries.library.when")}</th>
-          <th scope="col">{t("queries.library.state")}</th>
+          <SortHeader {...sorting.header("created")}>{t("queries.library.when")}</SortHeader>
+          <SortHeader {...sorting.header("status")}>{t("queries.library.state")}</SortHeader>
           <th scope="col">
             <span className="visually-hidden">{t("list.open")}</span>
           </th>

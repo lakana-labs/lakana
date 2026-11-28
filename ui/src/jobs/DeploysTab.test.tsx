@@ -7,6 +7,7 @@ import type { DeployOut } from "../api/jobs";
 import { aDeploy, aDeployment, DEPLOY_VERSION, ENVIRONMENTS } from "../test/jobs";
 import { held } from "../test/pending";
 import { type FakeAnswer, type FakeRoute, fakeServer } from "../test/server";
+import { expectServerSorts } from "../test/sorting";
 import { DeploysTab } from "./DeploysTab";
 
 const CURRENT = aDeployment();
@@ -121,7 +122,7 @@ describe("DeploysTab", () => {
     const { server, user } = renderTab(list([NOW]));
     await screen.findByRole("region", { name: "Deploys of dev" });
 
-    await user.click(screen.getByRole("button", { name: /Repository/u }));
+    await user.click(screen.getByRole("button", { name: /Repository/u, expanded: false }));
     await user.click(await screen.findByRole("option", { name: "analytics" }));
     await waitFor(() => {
       expect(server.sent.at(-1)?.path).toBe(
@@ -130,7 +131,7 @@ describe("DeploysTab", () => {
     });
     expect(screen.getByTestId("address")).toHaveTextContent("?repository=analytics");
 
-    await user.click(screen.getByRole("button", { name: /Repository/u }));
+    await user.click(screen.getByRole("button", { name: /Repository/u, expanded: false }));
     await user.click(screen.getByRole("option", { name: "All repositories" }));
     expect(screen.getByTestId("address")).toBeEmptyDOMElement();
   });
@@ -142,7 +143,7 @@ describe("DeploysTab", () => {
     );
     await screen.findByRole("region", { name: "Deploys of dev" });
     const offered = async (): Promise<string[]> => {
-      await user.click(screen.getByRole("button", { name: /Repository/u }));
+      await user.click(screen.getByRole("button", { name: /Repository/u, expanded: false }));
       const names = (await screen.findAllByRole("option")).map((option) => option.textContent);
       await user.keyboard("{Escape}");
       return names;
@@ -151,13 +152,13 @@ describe("DeploysTab", () => {
     // billing is no longer deployed in dev, but its deploys are in the list.
     expect(await offered()).toEqual(["All repositories", "analytics", "billing"]);
     // The menu says where its choices come from.
-    await user.click(screen.getByRole("button", { name: /Repository/u }));
+    await user.click(screen.getByRole("button", { name: /Repository/u, expanded: false }));
     const note =
       "Lists the repositories deployed in dev now and those whose deploys this list has shown.";
     expect(screen.getByText(note)).toBeVisible();
     expect(screen.getByRole("listbox")).toHaveAccessibleDescription(note);
     await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: /Repository/u }));
+    await user.click(screen.getByRole("button", { name: /Repository/u, expanded: false }));
     await user.click(await screen.findByRole("option", { name: "billing" }));
     await waitFor(() => {
       expect(screen.getByTestId("address")).toHaveTextContent("?repository=billing");
@@ -170,7 +171,9 @@ describe("DeploysTab", () => {
     renderTab(list([]), "/jobs/deploys?repository=team%2Fbilling");
 
     expect(await screen.findByText("No deploy of team/billing in dev yet.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Repository/u })).toHaveTextContent("team/billing");
+    expect(screen.getByRole("button", { name: /Repository/u, expanded: false })).toHaveTextContent(
+      "team/billing",
+    );
   });
 
   it("says when an environment has no deploy", async () => {
@@ -742,6 +745,20 @@ describe("DeploysTab's sort", () => {
       "aria-sort",
       "ascending",
     );
+  });
+});
+
+describe("DeploysTab's other sorts", () => {
+  it("sorts by kind, repository and who on the server; the commit does not sort", async () => {
+    const { server, user } = renderTab(list([NOW]), "/jobs/deploys?environment=prod");
+    await screen.findByRole("region", { name: /Deploys/u });
+    const region = (): HTMLElement => screen.getByRole("region", { name: /Deploys/u });
+    expect(within(region()).queryByRole("button", { name: "Commit" })).toBeNull();
+    await expectServerSorts(user, region, server.sent, "/api/v1/", [
+      ["Kind", "sort=kind&order=asc"],
+      ["Repository", "sort=repository&order=asc"],
+      ["By", "sort=who&order=asc"],
+    ]);
   });
 });
 

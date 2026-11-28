@@ -46,8 +46,8 @@ import "./connectionStrings";
  * The columns the connections sort by. Their own order, the newest first, is no column; by state,
  * the failed tests come first, then the open ones, then those that passed, never tested last.
  */
-const CONNECTION_SORTS: ListSortSpec<"name" | "status"> = {
-  fields: { name: "asc", status: "asc" },
+const CONNECTION_SORTS: ListSortSpec<"name" | "kind" | "environment" | "status"> = {
+  fields: { name: "asc", kind: "asc", environment: "asc", status: "asc" },
   natural: null,
 };
 
@@ -181,11 +181,15 @@ function ConnectionTable({
         head={
           <tr>
             <SortHeader {...sorting.header("name")}>{t("connections.list.name")}</SortHeader>
-            <th scope="col">{t("connections.list.kind")}</th>
+            <SortHeader {...sorting.header("kind")}>{t("connections.list.kind")}</SortHeader>
+            {/* Where is an address of a kind's own parts (a host, a bucket, a path), and Used
+                by a count of other projects' declarations: neither has one order in the list. */}
             <th scope="col" className="narrow-hide">
               {t("connections.list.where")}
             </th>
-            <th scope="col">{t("connections.list.environment")}</th>
+            <SortHeader {...sorting.header("environment")}>
+              {t("connections.list.environment")}
+            </SortHeader>
             <SortHeader {...sorting.header("status")}>{t("connections.list.status")}</SortHeader>
             <th scope="col" className="number narrow-hide">
               {t("connections.list.usedBy")}

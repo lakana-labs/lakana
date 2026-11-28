@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PermissionsOut } from "../../api";
 import { renderShell } from "../../test/render";
+import { expectServerSorts, sortBy } from "../../test/sorting";
 import {
   FILTERS,
   grant,
@@ -619,5 +620,30 @@ describe("AccessTab", () => {
 
     expect(await within(level).findByRole("link", { name: "kim.schulz" })).toBeVisible();
     expect(screen.getByRole("heading", { level: 3, name: "On namespace gold" })).toHaveFocus();
+  });
+});
+
+describe("AccessTab's sorts", () => {
+  it("sorts every level's grants by one sort, and the policies by whom and column", async () => {
+    const { server, user, router } = renderShell(TAB);
+    const level = await section("On this table", 3);
+    await within(level).findByRole("link", { name: "kim.schulz" });
+    const grantReads = (): string[] =>
+      server.sent.filter((r) => r.path.startsWith(GRANTS_PATH)).map((r) => r.path);
+
+    await sortBy(user, level, "Person or group");
+    await waitFor(() => {
+      expect(grantReads().filter((path) => path.includes("sort=who&order=asc"))).toHaveLength(5);
+    });
+    expect(router.state.location.search).toBe("?grantsSort=who");
+    const filters = await section("Row filters");
+    expect(within(filters).queryByRole("button", { name: "Expression" })).toBeNull();
+    await expectServerSorts(user, filters, server.sent, "/api/v1/row-filters", [
+      ["Person or group", "sort=who&order=asc"],
+    ]);
+    const masks = await section("Column masks");
+    await expectServerSorts(user, masks, server.sent, "/api/v1/column-masks", [
+      ["Column", "sort=column&order=asc"],
+    ]);
   });
 });
