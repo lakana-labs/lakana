@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AccessOverrideOut, ManagedScopeOut } from "../api/accessFile";
 import { renderShell } from "../test/render";
+import { columnTexts, sortBy, sortState } from "../test/sorting";
 import { scopeState } from "./AccessFilePage";
 
 const PATH = "/settings/access/access-file";
@@ -91,6 +92,49 @@ describe("AccessFilePage", () => {
     expect(
       screen.getByText("The next apply reverts each change the file does not list."),
     ).toBeInTheDocument();
+  });
+
+  it("sorts the scopes and the changes by hand by their columns; the reason does not sort", async () => {
+    const { user } = renderStatus(
+      [
+        aScope(),
+        aScope({ scope: "prod", file_name: "prod.yaml", applied_at: "2026-11-19T09:00:00Z" }),
+      ],
+      [
+        anOverride(),
+        anOverride({
+          change: "grant ANALYST on prod to user:kim",
+          by: null,
+          at: "2026-11-19T09:00:00Z",
+        }),
+      ],
+    );
+    const scopes = await screen.findByRole("region", { name: "Managed scopes" });
+
+    await sortBy(user, scopes, "Last apply");
+    expect(columnTexts(scopes)).toEqual(["Environment prod", "The whole instance"]);
+    await sortBy(user, scopes, "State");
+    expect(sortState(scopes, "State")).toBe("ascending");
+    expect(columnTexts(scopes)).toEqual(["The whole instance", "Environment prod"]);
+    await sortBy(user, scopes, "File");
+    await sortBy(user, scopes, "File");
+    expect(columnTexts(scopes)).toEqual(["Environment prod", "The whole instance"]);
+    await sortBy(user, scopes, "Scope");
+    expect(sortState(scopes, "Scope")).toBe("ascending");
+
+    const changes = screen.getByRole("region", { name: "Changes by hand" });
+    expect(within(changes).queryByRole("button", { name: "Why" })).toBeNull();
+    await sortBy(user, changes, "Change");
+    expect(columnTexts(changes, 1)).toEqual([
+      "grant ANALYST on prod to user:kim",
+      "grant VIEWER on prod to user:bob",
+    ]);
+    await sortBy(user, changes, "By");
+    expect(columnTexts(changes, 3)).toEqual(["admin", "a deleted account"]);
+    await sortBy(user, changes, "When");
+    expect(columnTexts(changes, 3)).toEqual(["a deleted account", "admin"]);
+    await sortBy(user, changes, "Scope");
+    expect(sortState(changes, "Scope")).toBe("ascending");
   });
 
   it("marks what people typed", async () => {

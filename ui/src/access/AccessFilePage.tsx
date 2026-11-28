@@ -23,6 +23,9 @@ import "./accessFile.css";
 import "./accessFileStrings";
 import "./accessStrings";
 import { INSTANCE_SCOPE, managedScopeOf } from "./managed";
+import { type ListSortSpec, sortRows } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import { useAccessStatus } from "./useAccessStatus";
 
 // Download access file's form loads when it is opened, not with the page.
@@ -105,6 +108,20 @@ function ScrollTable({
   );
 }
 
+/** The columns the managed scopes sort by, in the browser: the status is read whole. */
+const SCOPE_SORT: ListSortSpec<"scope" | "file" | "applied" | "state"> = {
+  fields: { scope: "asc", file: "asc", applied: "desc", state: "asc" },
+  natural: null,
+  param: "scopes",
+};
+
+/** The columns the changes made outside the file sort by, in the browser. */
+const CHANGE_SORT: ListSortSpec<"scope" | "change" | "by" | "when"> = {
+  fields: { scope: "asc", change: "asc", by: "asc", when: "desc" },
+  natural: null,
+  param: "changes",
+};
+
 /**
  * Renders the place: the managed scopes (each with its file, its last apply and whether it was
  * changed by hand since), the open changes by hand, and the commands. Read once, not polled.
@@ -120,6 +137,8 @@ export function AccessFilePage(): JSX.Element {
   const [note, setNote] = useState("");
   const scopes = status.data?.scopes ?? [];
   const overrides = status.data?.overrides ?? [];
+  const scopeSorting = useListSort(SCOPE_SORT);
+  const changeSorting = useListSort(CHANGE_SORT);
   const file = (managedScopeOf(scopes, null) ?? scopes[0])?.file_name ?? DEFAULT_FILE;
   return (
     <SettingsFrame
@@ -162,14 +181,28 @@ export function AccessFilePage(): JSX.Element {
               region={t("accessFile.scopes.title")}
               head={
                 <tr>
-                  <th scope="col">{t("accessFile.scopes.scope")}</th>
-                  <th scope="col">{t("accessFile.scopes.file")}</th>
-                  <th scope="col">{t("accessFile.scopes.applied")}</th>
-                  <th scope="col">{t("accessFile.scopes.state")}</th>
+                  <SortHeader {...scopeSorting.header("scope")}>
+                    {t("accessFile.scopes.scope")}
+                  </SortHeader>
+                  <SortHeader {...scopeSorting.header("file")}>
+                    {t("accessFile.scopes.file")}
+                  </SortHeader>
+                  <SortHeader {...scopeSorting.header("applied")}>
+                    {t("accessFile.scopes.applied")}
+                  </SortHeader>
+                  <SortHeader {...scopeSorting.header("state")}>
+                    {t("accessFile.scopes.state")}
+                  </SortHeader>
                 </tr>
               }
             >
-              {scopes.map((scope) => {
+              {sortRows(scopes, scopeSorting.sort, {
+                scope: (scope) => scope.scope,
+                file: (scope) => scope.file_name,
+                applied: (scope) => scope.applied_at,
+                // In sync first going up, then by how many changes differ.
+                state: (scope) => scopeState(scope, overrides).count,
+              }).map((scope) => {
                 const state = scopeState(scope, overrides);
                 return (
                   <tr key={scope.scope}>
@@ -226,15 +259,30 @@ export function AccessFilePage(): JSX.Element {
             region={t("accessFile.changes.region")}
             head={
               <tr>
-                <th scope="col">{t("accessFile.changes.scope")}</th>
-                <th scope="col">{t("accessFile.changes.change")}</th>
+                <SortHeader {...changeSorting.header("scope")}>
+                  {t("accessFile.changes.scope")}
+                </SortHeader>
+                <SortHeader {...changeSorting.header("change")}>
+                  {t("accessFile.changes.change")}
+                </SortHeader>
+                {/* A reason is a free-form note, with no order that means something. */}
                 <th scope="col">{t("accessFile.changes.why")}</th>
-                <th scope="col">{t("accessFile.changes.by")}</th>
-                <th scope="col">{t("accessFile.changes.when")}</th>
+                <SortHeader {...changeSorting.header("by")}>
+                  {t("accessFile.changes.by")}
+                </SortHeader>
+                <SortHeader {...changeSorting.header("when")}>
+                  {t("accessFile.changes.when")}
+                </SortHeader>
               </tr>
             }
           >
-            {overrides.map((override, index) => (
+            {sortRows(overrides, changeSorting.sort, {
+              scope: (override) => override.scope,
+              change: (override) => override.change,
+              // A deleted person sorts last.
+              by: (override) => override.by,
+              when: (override) => override.at,
+            }).map((override, index) => (
               // An override has no id of its own; the list is read once and never reordered.
               <tr key={index}>
                 <td>
