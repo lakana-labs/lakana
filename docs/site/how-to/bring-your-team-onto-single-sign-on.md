@@ -194,10 +194,13 @@ Successful sign-ins are `SIGN_IN_OIDC`, links and unlinks `PRINCIPAL_OIDC_LINKED
   at none, the operator issues one a recovery link as above.
 - **Turning single sign-on off** means removing every `LAKANA_OIDC__` line from the `server`
   service's `environment:` in `compose.yaml` as well as from `.env`. A line left in `compose.yaml`
-  passes an empty value, which the server treats as not set, so an empty `LAKANA_OIDC__ISSUER`
-  also turns it off; removing the lines from both files is the tidy way. Everyone linked then signs in with their passkeys again (deactivate
-  first anyone who should not), and someone without a passkey needs a recovery link. Their API
-  tokens stop at the end of the token window and stay stopped, as there is nothing to link to.
+  passes an empty value, which the server treats as not set, so emptying `LAKANA_OIDC__ISSUER`,
+  `LAKANA_OIDC__CLIENT_ID` and `LAKANA_OIDC__CLIENT_SECRET` in `.env` turns it off too; an empty
+  issuer beside a client id or secret stops the server instead, so that a lost issuer line never
+  turns single sign-on off by accident. Removing the lines from both files is the tidy way.
+  Everyone linked then signs in with their passkeys again (deactivate first anyone who should
+  not), and someone without a passkey needs a recovery link. Their API tokens stop at the end of
+  the token window and stay stopped, as there is nothing to link to.
   To let someone use tokens again, unlink them as in
   [Take someone off single sign-on](#take-someone-off-single-sign-on): that deletes their
   passkeys and revokes their tokens, so send them a recovery link, and they add a passkey and

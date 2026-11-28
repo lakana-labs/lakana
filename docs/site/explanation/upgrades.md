@@ -139,6 +139,19 @@ Each cell is a summary. The page named in the last column has the detail. The ch
 
 ## Notes for the next release
 
+### An empty single sign-on setting counts as not set; a client without an issuer stops the start (breaking)
+
+An empty `LAKANA_OIDC__` or `LAKANA_CI_OIDC__` setting (empty, or only spaces) now counts as not
+set, as a missing line does. Compose passes an empty value for every `${VAR}` line whose variable
+`.env` leaves empty, so such a line no longer stops the server: an empty
+`LAKANA_OIDC__DISPLAY_NAME` shows the issuer's host name, an empty `LAKANA_CI_OIDC__ALGORITHMS`
+means `RS256`.
+
+A `LAKANA_OIDC__CLIENT_ID` or `LAKANA_OIDC__CLIENT_SECRET` without `LAKANA_OIDC__ISSUER` now stops
+the server at start-up, naming the variable; earlier releases started with single sign-on off when
+the variables were set directly (not through Compose). Before upgrading, either set the issuer, or,
+to keep single sign-on off, remove the client id and the secret (or leave all three empty).
+
 ### What a project defines can be changed only in git (breaking)
 
 A table, view or artifact that a deployed project builds is owned by its file in git. Every way in

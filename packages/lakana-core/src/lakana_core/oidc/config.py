@@ -215,7 +215,8 @@ class OidcSignInConfig(ProxyAndCaBundleChecks):
 
     With no issuer (the default) OIDC sign-in is off and the interface does not mention it. With
     one, the server also needs `LAKANA_OIDC__CLIENT_ID`, `LAKANA_OIDC__CLIENT_SECRET`,
-    `LAKANA_UI__ENABLED=true` and `LAKANA_UI__PUBLIC_URL`, or it does not start. Register
+    `LAKANA_UI__ENABLED=true` and `LAKANA_UI__PUBLIC_URL`, or it does not start; a client id or
+    secret without an issuer does not start it either. An empty value counts as not set. Register
     `<LAKANA_UI__PUBLIC_URL>/api/v1/sign-in/oidc/callback` as the redirect URI with the provider.
     The server reads the provider's discovery document, keys and token endpoint over ``https``,
     on port 443 or the port in the issuer, from public addresses unless the host is in
@@ -235,10 +236,11 @@ class OidcSignInConfig(ProxyAndCaBundleChecks):
         Deactivate in Lakana anyone who left at the old provider: the start-up log names the
         people concerned.
     client_id
-        The client id the provider gave Lakana. Required with an issuer.
+        The client id the provider gave Lakana. Required with an issuer, and refused without
+        one: to turn sign-in off, leave the issuer, the client id and the secret all empty.
     client_secret
         The client secret the provider gave Lakana; sent only to the provider's token endpoint,
-        never shown or logged. Required with an issuer.
+        never shown or logged. Required with an issuer, and refused without one.
     scopes
         The scopes Lakana asks for, as a space- or comma-separated list or a JSON list (default
         `openid profile email`). It must contain `openid`. Lakana reads only the ID token's
@@ -469,7 +471,7 @@ class OidcSignInConfig(ProxyAndCaBundleChecks):
 
     @model_validator(mode="after")
     def _client_when_enabled(self) -> Self:
-        """Require the client id and secret once an issuer is set.
+        """Require the client id and secret once an issuer is set, and the issuer with either.
 
         Returns
         -------
@@ -479,9 +481,22 @@ class OidcSignInConfig(ProxyAndCaBundleChecks):
         Raises
         ------
         ValueError
-            Naming the missing variable.
+            Naming the missing variable, or the client setting given without an issuer.
         """
         if self.issuer is None:
+            # A lost issuer line must stop the start, not quietly turn single sign-on off: the
+            # people linked would then sign in with their passkeys (#853).
+            for variable, value in (
+                ("LAKANA_OIDC__CLIENT_ID", self.client_id),
+                ("LAKANA_OIDC__CLIENT_SECRET", self.client_secret),
+            ):
+                if value is not None:
+                    raise ValueError(
+                        f"{variable} is set without LAKANA_OIDC__ISSUER: set the issuer to sign "
+                        "in through the identity provider, or, to turn single sign-on off, leave "
+                        "LAKANA_OIDC__ISSUER, LAKANA_OIDC__CLIENT_ID and "
+                        "LAKANA_OIDC__CLIENT_SECRET empty or remove them"
+                    )
             return self
         for variable, value in (
             ("LAKANA_OIDC__CLIENT_ID", self.client_id),

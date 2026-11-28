@@ -236,16 +236,28 @@ def test_the_documented_lines_start_the_server(monkeypatch: pytest.MonkeyPatch) 
 def test_a_setting_left_out_of_env_counts_as_not_set(
     monkeypatch: pytest.MonkeyPatch, left_out: str
 ) -> None:
-    """The line still in compose.yaml passes an empty value, which means not set (#853)."""
+    """The line still in compose.yaml passes an empty value, which means not set (#853).
+
+    An empty display name takes the default. An empty issuer beside a client id and secret
+    stops the start: a lost issuer line must not quietly turn single sign-on off.
+    """
     env = {k: v for k, v in _env("oidc-keycloak.env").items() if k != left_out}
     passed = _compose_environment(env)
     assert passed[left_out] == ""
-    assert _server_starts(monkeypatch, passed)
-    removed = {k: v for k, v in passed.items() if k != left_out}
-    assert _server_starts(monkeypatch, removed)
+    if left_out == "LAKANA_OIDC__ISSUER":
+        assert not _server_starts(monkeypatch, passed)
+        # Turning single sign-on off empties or removes the issuer and the client settings.
+        client = ("LAKANA_OIDC__ISSUER", "LAKANA_OIDC__CLIENT_ID", "LAKANA_OIDC__CLIENT_SECRET")
+        assert _server_starts(monkeypatch, {**passed, **dict.fromkeys(client, "")})
+        assert _server_starts(monkeypatch, {})
+    else:
+        assert _server_starts(monkeypatch, passed)
+        assert _server_starts(monkeypatch, {k: v for k, v in passed.items() if k != left_out})
 
 
-def test_every_empty_setting_starts_the_server(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_only_an_empty_issuer_or_client_setting_stops_the_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from lakana_core.oidc.config import OidcSignInConfig
 
     full = _compose_environment(_env("oidc-keycloak.env"))
@@ -254,24 +266,25 @@ def test_every_empty_setting_starts_the_server(monkeypatch: pytest.MonkeyPatch) 
         key = f"{PREFIX}{field.upper()}"
         if not _server_starts(monkeypatch, {**full, key: ""}):
             refused.add(key)
-    # An issuer without its client stays refused, as the pages say.
-    assert refused == {f"{PREFIX}CLIENT_ID", f"{PREFIX}CLIENT_SECRET"}
+    # An issuer without its client, and a client without its issuer, are refused.
+    assert refused == {f"{PREFIX}ISSUER", f"{PREFIX}CLIENT_ID", f"{PREFIX}CLIENT_SECRET"}
 
 
 def test_the_pages_say_an_empty_setting_counts_as_not_set() -> None:
     rule = (
         "the server treats an empty `LAKANA_OIDC__` setting as not set: an empty "
-        "`LAKANA_OIDC__DISPLAY_NAME` puts the issuer's host name on the button, and an empty "
-        "`LAKANA_OIDC__ISSUER` turns single sign-on off. To leave a setting out, removing its "
-        "line from both files stays the tidy way"
+        "`LAKANA_OIDC__DISPLAY_NAME` puts the issuer's host name on the button. A client id or "
+        "secret without an issuer stops the server, so that a lost `LAKANA_OIDC__ISSUER` line "
+        "cannot quietly turn single sign-on off; to turn it off, leave the issuer, the client id "
+        "and the secret all empty."
     )
     for page in PAGES:
         assert rule in " ".join((HOW_TO / page).read_text().split()), page
     guide = " ".join((HOW_TO / "bring-your-team-onto-single-sign-on.md").read_text().split())
     assert "means removing every `LAKANA_OIDC__` line from the `server` service's" in guide
     assert (
-        "passes an empty value, which the server treats as not set, so an empty "
-        "`LAKANA_OIDC__ISSUER` also turns it off"
+        "an empty issuer beside a client id or secret stops the server instead, so that a lost "
+        "issuer line never turns single sign-on off by accident"
     ) in guide
 
 

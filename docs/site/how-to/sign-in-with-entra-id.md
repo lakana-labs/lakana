@@ -117,9 +117,11 @@ services:
 
 Each line takes its value from `.env`. Compose passes a variable that `.env` lacks, or leaves
 empty, as an empty value, and the server treats an empty `LAKANA_OIDC__` setting as not set: an
-empty `LAKANA_OIDC__DISPLAY_NAME` puts the issuer's host name on the button, and an empty
-`LAKANA_OIDC__ISSUER` turns single sign-on off. To leave a setting out, removing its line from
-both files stays the tidy way: Compose warns about a variable that `.env` lacks.
+empty `LAKANA_OIDC__DISPLAY_NAME` puts the issuer's host name on the button. A client id or secret
+without an issuer stops the server, so that a lost `LAKANA_OIDC__ISSUER` line cannot quietly turn
+single sign-on off; to turn it off, leave the issuer, the client id and the secret all empty. To
+leave a setting out, removing its line from both files stays the tidy way: Compose warns about a
+variable that `.env` lacks.
 
 Then restart the server from the bundle's directory:
 

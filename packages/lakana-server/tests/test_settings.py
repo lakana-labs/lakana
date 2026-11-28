@@ -221,6 +221,21 @@ def test_empty_oidc_settings_count_as_not_set(
     assert settings.oidc.scopes == ["openid", "profile", "email"]
 
 
+def test_a_client_without_an_issuer_stops_the_start(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A lost issuer line must not quietly turn single sign-on off (#853)."""
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/p.db")
+    monkeypatch.setenv("LAKANA_OIDC__ISSUER", "")
+    monkeypatch.setenv("LAKANA_OIDC__CLIENT_ID", "lakana")
+    monkeypatch.setenv("LAKANA_OIDC__CLIENT_SECRET", "s3cr3t-sentinel")
+    with pytest.raises(
+        pydantic.ValidationError, match="LAKANA_OIDC__CLIENT_ID is set without LAKANA_OIDC__ISSUER"
+    ) as info:
+        Settings()
+    assert "s3cr3t-sentinel" not in str(info.value)
+
+
 def _oidc_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Set everything OIDC sign-in needs.
 

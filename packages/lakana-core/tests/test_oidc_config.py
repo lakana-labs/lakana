@@ -200,3 +200,19 @@ def test_only_a_mapping_loses_its_empty_values() -> None:
     built = config()
     assert without_empty_values(built) is built
     assert OidcSignInConfig.model_validate(built) == built
+
+
+@pytest.mark.parametrize("given", ["client_id", "client_secret"])
+@pytest.mark.parametrize("issuer", [None, "", "  "])
+def test_a_client_setting_without_an_issuer_is_refused(given: str, issuer: str | None) -> None:
+    """A lost issuer line must not quietly turn single sign-on off (#853)."""
+    fields = {"issuer": issuer, given: "lakana" if given == "client_id" else "s3cr3t-sentinel"}
+    with pytest.raises(pydantic.ValidationError) as info:
+        OidcSignInConfig.model_validate(fields)
+    message = str(info.value)
+    assert f"LAKANA_OIDC__{given.upper()} is set without LAKANA_OIDC__ISSUER" in message
+    assert (
+        "leave LAKANA_OIDC__ISSUER, LAKANA_OIDC__CLIENT_ID and LAKANA_OIDC__CLIENT_SECRET"
+        in message
+    )
+    assert "s3cr3t-sentinel" not in message
