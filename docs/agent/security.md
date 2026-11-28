@@ -7294,7 +7294,12 @@ in; linking, the token window and `lakana login` are the next pull requests of #
   start adds at most one fetch per minute and no new destination. A start never waits for a fetch
   another request runs (up to about 25 s against a provider that drops packets): it answers from
   the latest finished fetch, refused when that failed or none has finished
-  (`test_a_start_during_a_fetch_does_not_wait_for_it`). The refusal is a fixed sentence per purpose
+  (`test_a_start_during_a_fetch_does_not_wait_for_it`,
+  `test_a_start_returns_while_another_request_holds_the_lock`); only the request that runs the
+  fetch waits for it. Maintainer decision (#865, 2026-11-28): this, not a strict refusal while a
+  fetch runs, because a healthy provider is re-fetched every minute and a strict refusal would show
+  "can't be reached" for a provider that is up. Any exception from a fetch counts as failed
+  (`last_failed`, set once the fetch has ended). The refusal is a fixed sentence per purpose
   that names the provider (an operator setting) and the next step; the fetch error and the issuer
   URL stay in the log (`_unreachable` in `test_oidc_sign_in.py` checks both), and it is recorded as
   `provider_unreachable` (#854,
