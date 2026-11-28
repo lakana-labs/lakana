@@ -94,7 +94,15 @@ describe("ColumnsTab", () => {
   });
 
   it("sorts the columns by each fact but the description", async () => {
-    const { user } = renderShell(PAGE, { routes: { [PERMISSIONS]: READ_ONLY } });
+    const schema = TABLE.schema.map((column) =>
+      column.name === "sale_id" ? { ...column, terms: [{ key: "t1", name: "Sale" }] } : column,
+    );
+    const { user } = renderShell(PAGE, {
+      routes: {
+        [PERMISSIONS]: READ_ONLY,
+        [`GET ${TABLE_PATH}`]: { status: 200, body: table({ schema }) },
+      },
+    });
     await rows();
     const region = screen.getByRole("region", { name: "Table columns" });
     const names = (): (string | null)[] => columnTexts(region);
@@ -113,6 +121,7 @@ describe("ColumnsTab", () => {
     expect(columnTexts(region, 4)[0]).toContain("gold.dim_store.store_id");
     await sortBy(user, region, "Type");
     await sortBy(user, region, "Terms");
+    expect(columnTexts(region, 6)[0]).toBe("Sale");
     expect(within(region).queryByRole("button", { name: "Description" })).toBeNull();
   });
 
