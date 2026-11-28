@@ -300,6 +300,16 @@ describe("LineageTab", () => {
     await waitFor(() => {
       expect(open).toHaveFocus();
     });
+    await user.click(open);
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Close dialog" }),
+    );
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(open).toHaveFocus();
+    });
   });
 
   it("marks hidden characters of the table's name in the regions and the dialog's heading", async () => {

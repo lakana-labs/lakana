@@ -79,7 +79,9 @@ const NAMED_LIMITS = [
   // of environment (typed by a person who may list none), table and who shared with Grants, the two lists with the Git mark, Delete
   // and its question, the managed note with both commands, and the place's strings); Add filter
   // or mask loads when it is opened (AddPolicyDialog-, on the shared limit).
-  { name: "Row filters & masks", prefix: "FiltersAndMasksPage-", limit: "4.65 kB" },
+  // Raised to the measured 4.66 kB (2026-11-28, #855) + 10 %: the dialog's × (DialogClose),
+  // which its Delete question carries through ActionDialog, put it 6 B over.
+  { name: "Row filters & masks", prefix: "FiltersAndMasksPage-", limit: "5.13 kB" },
   // Measured 3.26 kB (2026-11-18) + 10 %: Settings › Access › Secrets (the environment picker
   // over the environments where the person manages secrets, the remembered choice, the list with
   // each secret's use and Rotate, Set use and Delete, and the loaders of the dialogs); the

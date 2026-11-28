@@ -82,7 +82,7 @@ test("Retention on tomorrow's day puts the table in Expiring with its rule", asy
   await dialog.getByRole("textbox", { name: "Day" }).fill(tomorrow);
   await dialog.getByRole("button", { name: "Save" }).click();
   await expect(dialog.getByText(/set for the table by admin/)).toBeVisible();
-  await dialog.getByRole("button", { name: "Close" }).click();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
 
   await page.goto(`/catalog?env=${environment}&view=expiring`);
   const row = page.getByRole("row").filter({ hasText: "fact_sales" });

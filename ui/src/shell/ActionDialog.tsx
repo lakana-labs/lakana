@@ -1,14 +1,17 @@
 /**
- * A dialog for one action: centred over the dimmed page, closed by its own buttons or Escape.
+ * A dialog for one action: centred over the dimmed page, closed by its own buttons, the × in its
+ * top corner or Escape.
  *
  * @packageDocumentation
  */
 import type { JSX, ReactNode } from "react";
 import { Dialog, Modal, ModalOverlay } from "react-aria-components";
 
+import { DialogClose } from "./DialogClose";
+
 /** Properties of {@link ActionDialog}. */
 export interface ActionDialogProps {
-  /** Called when the person closes the dialog with Escape. */
+  /** Called when the person closes the dialog with Escape or its ×: what its Cancel does. */
   readonly onClose: () => void;
   /** The content; its `<Heading slot="title">` names the dialog. */
   readonly children: ReactNode;
@@ -19,7 +22,7 @@ export interface ActionDialogProps {
  * shown once is not lost by a stray click.
  *
  * @param props - The close handler and the content.
- * @param props.onClose - Called on Escape.
+ * @param props.onClose - Called on Escape and by the ×.
  * @param props.children - The content.
  * @returns The dialog.
  */
@@ -27,7 +30,11 @@ export function ActionDialog({ onClose, children }: ActionDialogProps): JSX.Elem
   return (
     <ModalOverlay className="palette-overlay" isOpen onOpenChange={onClose}>
       <Modal className="float dialog">
-        <Dialog className="palette-dialog">{children}</Dialog>
+        <Dialog className="palette-dialog dialog-framed">
+          {/* The body scrolls, not the dialog: the × beside it stays in the corner. */}
+          <div className="dialog-body">{children}</div>
+          <DialogClose onClose={onClose} />
+        </Dialog>
       </Modal>
     </ModalOverlay>
   );

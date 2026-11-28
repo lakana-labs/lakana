@@ -923,7 +923,7 @@ test.describe("the table page in real Chromium", () => {
 
     // The Close button does the same.
     await open.click();
-    await dialog.getByRole("button", { name: "Close" }).click();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect(open).toBeFocused();
   });
@@ -1056,7 +1056,7 @@ test.describe("the table page in real Chromium", () => {
       expect(box.y + box.height).toBeLessThanOrEqual(height);
       expect(box.x + box.width).toBeGreaterThanOrEqual(width - 24);
       expect(box.y + box.height).toBeGreaterThanOrEqual(height - 24);
-      const close = await dialog.getByRole("button", { name: "Close" }).boundingBox();
+      const close = await dialog.getByRole("button", { name: "Close", exact: true }).boundingBox();
       expect((close?.y ?? height) + (close?.height ?? 0)).toBeLessThanOrEqual(height);
       expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(0);
       await page.keyboard.press("Escape");
@@ -1160,7 +1160,7 @@ test.describe("Maintain now and Retention in Chromium", () => {
     await expect(dialog.getByText("Maintenance is queued as query q-77.")).toBeVisible();
     await expect(dialog.getByText("lakana query status 'q-77' --env 'prod'")).toBeVisible();
     expect(await violations(page), "the queued dialog").toEqual([]);
-    await dialog.getByRole("button", { name: "Close" }).click();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await expect(page.getByRole("button", { name: "Actions" })).toBeFocused();
   });
 
