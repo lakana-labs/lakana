@@ -97,7 +97,11 @@ test.describe("the Jobs screen, checked by clicking through", () => {
     await expect(
       runs.locator("tr", { has: page.locator('a.row-name[aria-current="true"]') }),
     ).toHaveCSS("background-color", tint);
-    const weights = await runs.locator("a.row-name").evaluateAll((links) =>
+    // Read in the page through a CSS locator, not through `runs`: Firefox crashes when Playwright
+    // reads an aria-labelledby element's references in both its own world and the page's (a
+    // named getByRole, then evaluateAll). Mozilla bug 2090055; Playwright #43967, fixed in its
+    // Firefox build 1575 and later.
+    const weights = await page.locator(".jobs-runs-scroll a.row-name").evaluateAll((links) =>
       links.map((link) => ({
         chosen: link.getAttribute("aria-current") === "true",
         weight: Number(getComputedStyle(link).fontWeight),

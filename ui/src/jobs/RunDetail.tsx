@@ -10,6 +10,7 @@ import {
   type ReactNode,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -248,12 +249,20 @@ function RunView({
   // for, "Cancelling…" once the run ends), the heading takes the focus instead of the page; when
   // the person moves the focus away themselves, it is forgotten, so nothing is taken from them.
   const held = useRef<Element | null>(null);
-  useEffect(() => {
+  const refocus = (): void => {
     if (held.current?.isConnected === false && document.activeElement === document.body) {
-      held.current = null;
       headingRef.current?.focus();
+      if (document.activeElement === headingRef.current) {
+        held.current = null;
+      }
     }
-  });
+  };
+  // First in the commit that removes the control, so the focus is never on the page in between
+  // (WebKit let a check, a key press or a screen reader find it there). While a question that
+  // just closed still leaves the page inert, which React Aria lifts in a passive effect, the
+  // focus cannot move yet: the passive effect after it moves it.
+  useLayoutEffect(refocus);
+  useEffect(refocus);
   const onControlsFocus = (event: FocusEvent): void => {
     held.current = event.target;
   };

@@ -439,6 +439,33 @@ describe("RunDetail", () => {
     expect(screen.queryByText("Cancelling…")).toBeNull();
   });
 
+  it("gives the focus to the run's heading after the closed question's page is no longer inert", async () => {
+    const active = aJobRun({ status: "running", finished_at: null, actions: ["cancel"] });
+    const server = renderRun({ status: 200, body: active });
+    server.route({
+      [`POST /api/v1/environments/prod/runs/${JOB_RUN_ID}/cancel`]: {
+        status: 200,
+        body: aJobRun({ status: "cancelled", cancel_requested: true }),
+      },
+    });
+    const user = userEvent.setup();
+    const cancel = await screen.findByRole("button", { name: "Cancel run" });
+    // In a browser the page stays inert in the commit that closes the question, until React
+    // Aria's passive effect lifts it, so the heading's first focus does nothing.
+    const heading = screen.getByRole("heading", { level: 2 });
+    const refused = vi.spyOn(heading, "focus").mockImplementationOnce(() => undefined);
+    await user.click(cancel);
+
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel run" }),
+    );
+
+    await waitFor(() => {
+      expect(heading).toHaveFocus();
+    });
+    expect(refused).toHaveBeenCalledTimes(2);
+  });
+
   it("gives the focus to the run's heading when Cancelling… goes as the run ends", async () => {
     let cancelled = false;
     const active = aJobRun({ status: "running", finished_at: null, actions: ["cancel"] });
@@ -471,6 +498,52 @@ describe("RunDetail", () => {
     );
     expect(screen.queryByText("Cancelling…")).toBeNull();
     expect(fact("State")).toHaveTextContent("Cancelled");
+  });
+
+  it("never leaves the focus on the page when Cancelling… goes as the run ends", async () => {
+    // WebKit gave a moment between the change and an effect run after it, in which the focus was
+    // on the page: a check, a key press or a screen reader then found nothing. Each change to the
+    // page is seen here before such an effect runs. Only once the run ends: while the question
+    // closes, the page stays inert in a browser until React Aria's passive effect lifts it, so
+    // Cancelling… takes the focus in a passive effect of its own.
+    let cancelled = false;
+    const active = aJobRun({ status: "running", finished_at: null, actions: ["cancel"] });
+    const server = renderRun(() => ({
+      status: 200,
+      body: cancelled ? aJobRun({ status: "cancelled", cancel_requested: true }) : active,
+    }));
+    server.route({
+      [`POST /api/v1/environments/prod/runs/${JOB_RUN_ID}/cancel`]: () => {
+        cancelled = true;
+        return { status: 200, body: { ...active, cancel_requested: true } };
+      },
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Cancel run" }));
+    const lost: string[] = [];
+    const watch = new MutationObserver(() => {
+      if (
+        document.activeElement === document.body &&
+        !document.body.textContent.includes("Cancelling…")
+      ) {
+        lost.push(document.body.innerHTML.length.toString());
+      }
+    });
+    watch.observe(document.body, { subtree: true, childList: true, characterData: true });
+
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel run" }),
+    );
+    const heading = screen.getByRole("heading", { level: 2 });
+    await waitFor(
+      () => {
+        expect(heading).toHaveFocus();
+      },
+      { timeout: 5_000 },
+    );
+    watch.disconnect();
+
+    expect(lost).toEqual([]);
   });
 
   it("takes no focus from a person who moved it away while Cancelling… shows", async () => {
