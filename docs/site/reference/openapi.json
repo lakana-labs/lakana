@@ -13390,7 +13390,7 @@
               ],
               "title": "Sort"
             },
-            "description": "What the list is sorted by: `issued` (the default), `environment`, `purpose` (the job, else the asset; one minted by hand last), `principal` or `expires`."
+            "description": "What the list is sorted by: `issued` (the default), `environment`, `purpose` (the job, else the asset; one minted by hand last), `acts_as` or `expires`."
           },
           {
             "name": "order",

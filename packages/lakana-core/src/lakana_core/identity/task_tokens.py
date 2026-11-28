@@ -77,7 +77,7 @@ TASK_TOKEN_SORTS: dict[str, bool] = {
     "issued": True,
     "environment": False,
     "purpose": False,
-    "principal": False,
+    "acts_as": False,
     "expires": False,
 }
 """The fields the live task tokens sort by, each with whether it runs from the largest down by
@@ -1075,7 +1075,7 @@ class TaskTokenService:
             "issued": SortField((newest._replace(descending=None),), descending=True),
             "environment": by_name(TaskToken.environment),
             "purpose": by_name(purpose, nullable=True),
-            "principal": by_name(principal.scalar_subquery()),
+            "acts_as": by_name(principal.scalar_subquery()),
             "expires": SortField((SortKey(TaskToken.expires_at, datetime), newest), False),
         }
 
@@ -1106,7 +1106,8 @@ class TaskTokenService:
         sort
             What the list is sorted by: ``issued`` (the default), ``environment``, ``purpose``
             (the job of the token's run, else its asset; a token minted by hand last in either
-            direction), ``principal`` or ``expires``; the tokens of one value newest first.
+            direction), ``acts_as`` (whom it signs in as) or ``expires``; the tokens of one
+            value newest first.
         order
             ``asc`` or ``desc``; by default ``desc`` for ``issued``, ``asc`` for the others.
 

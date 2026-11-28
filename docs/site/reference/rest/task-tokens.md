@@ -18,7 +18,7 @@ Parameters:
 | `environment` | query | no | text or null | Only the tokens of this environment; every environment when left out. |
 | `limit` | query | no | whole number | Most tokens returned (1 to 200). |
 | `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page; send the same `environment`. |
-| `sort` | query | no | text or null | What the list is sorted by: `issued` (the default), `environment`, `purpose` (the job, else the asset; one minted by hand last), `principal` or `expires`. |
+| `sort` | query | no | text or null | What the list is sorted by: `issued` (the default), `environment`, `purpose` (the job, else the asset; one minted by hand last), `acts_as` or `expires`. |
 | `order` | query | no | text or null | `asc` or `desc`; by default `desc` for `issued`, `asc` for the others. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 

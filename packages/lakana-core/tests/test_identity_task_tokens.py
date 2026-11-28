@@ -982,8 +982,10 @@ def test_list_live_sorts_by_every_column_one_a_page(session: Session, tmp_path: 
     assert walk(sort="purpose") == [t2, t3, t1]
     assert walk(sort="purpose", order="desc") == [t2, t3, t1]
     names = {t1: "worker-1", t3: "alpha", t2: admin.name.lower()}
-    assert walk(sort="principal") == sorted(names, key=lambda key: names[key])
+    assert walk(sort="acts_as") == sorted(names, key=lambda key: names[key])
     assert walk(sort="expires") == [t3, t2, t1]
     assert walk(sort="issued", order="asc") == [t1, t3, t2]
-    with pytest.raises(ValidationError, match="`sort` must be one of: environment, expires"):
+    with pytest.raises(
+        ValidationError, match="`sort` must be one of: acts_as, environment, expires"
+    ):
         service.list_live(admin, sort="scope")

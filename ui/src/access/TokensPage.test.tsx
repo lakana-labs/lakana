@@ -530,7 +530,7 @@ describe("TokensPage's sorts", () => {
     await expectServerSorts(user, task, server.sent, "/api/v1/task-tokens", [
       ["Environment", "sort=environment&order=asc"],
       ["For", "sort=purpose&order=asc"],
-      ["Acts as", "sort=principal&order=asc"],
+      ["Acts as", "sort=acts_as&order=asc"],
       ["Expires", "sort=expires&order=asc"],
     ]);
     expect(router.state.location.search).toBe("?tokensSort=expires&taskTokensSort=expires");

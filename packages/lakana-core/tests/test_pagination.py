@@ -593,3 +593,28 @@ def test_a_missing_value_sorts_last_in_either_direction(descending: bool) -> Non
     ]
     ordered = sorted(keys, reverse=descending)
     assert [key[-1] for key in ordered] == ["a", "b"]
+
+
+def test_a_duration_is_measured_by_each_database_its_own_way() -> None:
+    """Postgres subtracts the times and takes the epoch; SQLite subtracts Julian days."""
+    import sqlalchemy as sa
+    from sqlalchemy.orm import Session
+
+    from lakana_core.models import Run
+    from lakana_core.pagination import elapsed_ms
+
+    for url, word in (
+        ("sqlite://", "julianday"),
+        ("postgresql+pg8000://lakana@localhost/l", "EXTRACT"),
+    ):
+        engine = sa.create_engine(url)
+        try:
+            with Session(engine) as session:
+                compiled = str(
+                    elapsed_ms(session, Run.started_at, Run.finished_at, _AT).compile(
+                        dialect=engine.dialect
+                    )
+                )
+        finally:
+            engine.dispose()
+        assert word in compiled and "coalesce(runs.finished_at" in compiled

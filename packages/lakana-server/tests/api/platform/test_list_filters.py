@@ -291,7 +291,7 @@ _SORTABLE = {
     "/api/v1/row-filters": "created, on, who",
     "/api/v1/column-masks": "column, created, on, who",
     "/api/v1/tokens": "created, expires, last_used, name, owner",
-    "/api/v1/task-tokens": "environment, expires, issued, principal, purpose",
+    "/api/v1/task-tokens": "acts_as, environment, expires, issued, purpose",
     "/api/v1/environments/dev/dropped-tables": "dropped, name, purge",
     "/api/v1/environments/dev/expiring-tables": "expires, name",
     "/api/v1/environments/dev/orphans": "kind, name, repository",

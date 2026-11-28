@@ -52,8 +52,8 @@ Yield every matching audit event, newest first, fetching pages as needed.
 | `until` | `datetime | None` | `None` | Only yield events at or before this time, if given. |
 | `page_size` | `int` | `100` | Events per request, between 1 and 500 inclusive. |
 | `kind` | `str | None` | `None` | Only yield events of this kind, if given: ``connection`` is every ``CONNECTION_*`` type. |
-| `sort` | `str | None` | `None` | What the log is sorted by: ``occurred`` (the default), ``event``, ``who`` or ``on`` (the environment, namespace and table); the events of one value come newest first. |
-| `order` | `str | None` | `None` | ``desc`` (the default, the newest first) or ``asc``, the oldest first. Every order lists the same events. |
+| `sort` | `str | None` | `None` | The field, as `list` takes it. |
+| `order` | `str | None` | `None` | The direction, as `list` takes it. Every order lists the same events. |
 
 Yields: `AuditEvent`. Each matching event, once.
 

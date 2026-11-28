@@ -62,8 +62,8 @@ const PERSONAL_SORTS: ListSortSpec<"owner" | "name" | "created" | "last_used" | 
 };
 
 /** The columns the task tokens sort by, on the server; their own order is the newest first. */
-const TASK_SORTS: ListSortSpec<"environment" | "purpose" | "principal" | "issued" | "expires"> = {
-  fields: { environment: "asc", purpose: "asc", principal: "asc", issued: "desc", expires: "asc" },
+const TASK_SORTS: ListSortSpec<"environment" | "purpose" | "acts_as" | "issued" | "expires"> = {
+  fields: { environment: "asc", purpose: "asc", acts_as: "asc", issued: "desc", expires: "asc" },
   natural: { field: "issued", order: "desc" },
   param: "taskTokens",
 };
@@ -418,7 +418,7 @@ export function TaskTokens({ environment, heading, onState, round }: TaskTokensP
             columns={[
               [t("tokens.task.environment"), "environment"],
               [t("tokens.task.for"), "purpose"],
-              [t("tokens.task.principal"), "principal"],
+              [t("tokens.task.principal"), "acts_as"],
               [t("tokens.task.issued"), "issued"],
               [t("tokens.expires"), "expires"],
             ]}

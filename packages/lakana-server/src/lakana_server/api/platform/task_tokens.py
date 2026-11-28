@@ -54,7 +54,7 @@ def list_task_tokens(
         The `X-Next-Cursor` of the previous page; send the same `environment`.
     sort
         What the list is sorted by: `issued` (the default), `environment`, `purpose` (the
-        job, else the asset; one minted by hand last), `principal` or `expires`.
+        job, else the asset; one minted by hand last), `acts_as` or `expires`.
     order
         `asc` or `desc`; by default `desc` for `issued`, `asc` for the others.
     principal

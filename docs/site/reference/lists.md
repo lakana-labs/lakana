@@ -120,7 +120,7 @@ name (`grantsSort`, `membersSort`, …).
 | Groups | route only | `created`, `name` | `created` newest first; `name` from A |
 | Row filters and column masks | route only | `created`, `who`, `on`, and for column masks `column` | `created` newest first; the others from A, policies of one value newest first |
 | Every owner's live tokens (Access › Tokens) | route only | `created`, `owner`, `name`, `last_used`, `expires` (a token never used, or that never ends, last) | `created` and `last_used` latest first; the others from A or soonest first |
-| Live task tokens | route only | `issued`, `environment`, `purpose` (the job of its run, else its asset; one minted by hand last), `principal` (whom it acts as), `expires` | `issued` newest first; the others from A or soonest first |
+| Live task tokens | route only | `issued`, `environment`, `purpose` (the job of its run, else its asset; one minted by hand last), `acts_as` (the principal it signs in as), `expires` | `issued` newest first; the others from A or soonest first |
 | Dropped tables, of an environment or a namespace | route only | `dropped`, `name` (the table's, then its namespace), `purge` (when its files are deleted) | `dropped` latest first; the others from A or soonest first |
 | Expiring tables | route only | `expires` (then the dotted name), `name` | ascending |
 | Orphans | route only | `repository` (then the table), `name` (the table's), `kind` (one of no known kind last) | ascending |
