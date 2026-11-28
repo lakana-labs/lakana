@@ -483,7 +483,7 @@ test.describe("the Queries screen, checked by clicking through", () => {
       who.getByRole("radio", { name: "Everyone who can run queries in prod" }),
     ).not.toBeChecked();
     await expect(save).toContainText("It is saved in prod.");
-    await expect(save.getByRole("button")).toHaveText(["Save", "Save as new", "Cancel"]);
+    await expect(save.getByRole("button")).toHaveText(["Save", "Save as new", "Cancel", "×"]);
     await save.getByRole("button", { name: "Cancel" }).click();
 
     await page.getByRole("button", { name: "Delete…" }).click();

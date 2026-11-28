@@ -287,6 +287,14 @@ describe("SourceButton", () => {
       expect(path).toHaveFocus();
     });
 
+    await user.click(within(await openFile(user)).getByRole("button", { name: "Close dialog" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(path).toHaveFocus();
+    });
+
     await openFile(user);
     await user.keyboard("{Escape}");
     await waitFor(() => {
