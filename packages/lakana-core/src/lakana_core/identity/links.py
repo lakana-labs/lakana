@@ -950,7 +950,9 @@ class LinkService:
             )
         if not target.is_active:
             raise ConflictError(
-                f"{principal_name!r} is deactivated. Reactivate the account before recovering it."
+                f"{principal_name!r} is deactivated, and a deactivated account cannot be "
+                "recovered or reactivated. If this is a mistake, invite the person again under "
+                "another name."
             )
         operator = is_operator(self._session, p, bootstrap_name=self._bootstrap_name)
         if target.id == p.id and not operator:

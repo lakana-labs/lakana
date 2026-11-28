@@ -86,8 +86,8 @@ belongs to the project that builds the kept table. The refusal in full is the me
 count's query run."""
 
 ERROR_NO_PRINCIPAL = (
-    "the run's principal is deactivated, so the check was not run. Activate the principal, or "
-    "bind an active one to the deployment."
+    "the run's principal is deactivated, so the check was not run. Bind an active principal to "
+    "the deployment."
 )
 """A check's `error` when the run's principal was deactivated after the table was written."""
 
