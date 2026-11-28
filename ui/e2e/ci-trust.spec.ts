@@ -191,8 +191,16 @@ for (const theme of ["light", "dark"] as const) {
       ).toBeVisible();
       await tabTo(page, page.getByRole("textbox", { name: "Claims" }));
       await page.keyboard.insertText(CLAIMS);
-      await choose(page, page.getByRole("button", { name: /Environment$/ }), "prod");
-      await choose(page, page.getByRole("button", { name: /Repository$/ }), "analytics");
+      await choose(
+        page,
+        page.getByRole("button", { name: /Environment$/, expanded: false }),
+        "prod",
+      );
+      await choose(
+        page,
+        page.getByRole("button", { name: /Repository$/, expanded: false }),
+        "analytics",
+      );
       await press(page, page.getByRole("button", { name: "Explain" }));
       const verdict = page.getByRole("region", { name: "Verdict" });
       await expect(verdict.getByText("Accepted")).toBeVisible();

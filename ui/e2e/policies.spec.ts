@@ -105,7 +105,7 @@ for (const theme of ["light", "dark"] as const) {
       await expect(filters.getByText("region = 'EU'")).toBeVisible();
       expect(await violations(page), "Row filters & masks").toEqual([]);
 
-      await tabTo(page, page.getByRole("button", { name: /^Environment/ }));
+      await tabTo(page, page.getByRole("button", { name: /^Environment/, expanded: false }));
       await tabTo(page, page.getByRole("button", { name: /Who$/, expanded: false }));
       await tabTo(page, filters);
       await tabTo(page, page.getByRole("region", { name: "Column masks" }));

@@ -106,7 +106,7 @@ test.describe("the Jobs screen, checked by clicking through", () => {
     const heavy = weights.find((one) => one.chosen)?.weight ?? 0;
     expect(weights.filter((one) => !one.chosen).every((one) => one.weight < heavy)).toBe(true);
 
-    await page.getByRole("button", { name: /Status/u }).click();
+    await page.getByRole("button", { name: /Status/u, expanded: false }).click();
     await page.getByRole("option", { name: "Failed" }).click();
     await expect(page).toHaveURL(/[?&]status=failed/u);
     seen.push(where(page));

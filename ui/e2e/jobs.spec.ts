@@ -641,7 +641,7 @@ for (const theme of ["light", "dark"] as const) {
 
       // The filter's menu, not the column header that sorts by the state.
       const state = page
-        .getByRole("button", { name: /State/ })
+        .getByRole("button", { name: /State/, expanded: false })
         .and(page.locator(":not(.sort-head)"));
       await tabOnto(state);
       await page.keyboard.press("Enter");
@@ -817,14 +817,16 @@ for (const theme of ["light", "dark"] as const) {
         .getByRole("link", { name: "Deploys" })
         .click();
       await expect(page.getByRole("heading", { level: 1, name: "Deploys" })).toBeVisible();
-      await page.getByRole("button", { name: /Repository/ }).click();
+      await page.getByRole("button", { name: /Repository/, expanded: false }).click();
       await page.getByRole("option", { name: REPOSITORY }).click();
       await expect(page).toHaveURL(new RegExp(`repository=${REPOSITORY}`));
       await page.goBack();
       await expect(page).toHaveURL(
         new RegExp(`/jobs/runs\\?environment=${ENV}&trigger=schedule&period=7d$`),
       );
-      await expect(page.getByRole("button", { name: /Trigger/ })).toContainText("Schedule");
+      await expect(page.getByRole("button", { name: /Trigger/, expanded: false })).toContainText(
+        "Schedule",
+      );
       await expect(page.getByRole("button", { name: /Period/ })).toContainText("Last 7 days");
       await page.goForward();
       await expect(page).toHaveURL(
@@ -871,7 +873,7 @@ for (const theme of ["light", "dark"] as const) {
       // Each change goes straight on to the next, without waiting for the list (#744). The
       // Period is chosen and the job typed in one task of the page, before the address the
       // Period led to renders: both reach the address.
-      await page.getByRole("button", { name: /Trigger/ }).click();
+      await page.getByRole("button", { name: /Trigger/, expanded: false }).click();
       await page.getByRole("option", { name: "Schedule" }).click();
       await page.getByRole("button", { name: /Period/ }).click();
       await page.getByRole("option", { name: "Last 7 days" }).waitFor();
@@ -901,7 +903,9 @@ for (const theme of ["light", "dark"] as const) {
       await page.goBack();
       await expect(page).toHaveURL(/\/jobs\/runs\?trigger=schedule$/u);
       await expect(page.getByRole("heading", { level: 1, name: "Runs" })).toBeVisible();
-      await expect(page.getByRole("button", { name: /Trigger/ })).toContainText("Schedule");
+      await expect(page.getByRole("button", { name: /Trigger/, expanded: false })).toContainText(
+        "Schedule",
+      );
       await expect(page.getByRole("button", { name: /Period/ })).toContainText("Last 30 days");
       await page.goForward();
       await expect(page).toHaveURL(/\/jobs\/runs\?trigger=schedule&period=7d$/u);

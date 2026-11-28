@@ -86,9 +86,9 @@ for (const theme of ["light", "dark"] as const) {
       await expect(region.getByRole("link", { name: "analysts" })).toBeVisible();
 
       for (const control of [
-        page.getByRole("button", { name: /Who$/ }),
+        page.getByRole("button", { name: /Who$/, expanded: false }),
         page.getByRole("button", { name: /On exactly$/ }),
-        page.getByRole("button", { name: /What$/ }),
+        page.getByRole("button", { name: /What$/, expanded: false }),
         region,
         page.getByRole("button", { name: "Remove the grant ANALYST on dev for analysts" }),
       ]) {
