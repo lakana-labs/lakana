@@ -410,6 +410,13 @@ def test_a_quoted_interface_string_is_the_interface_s(
     assert _ui_text(file, key, name) in _page(page)
 
 
+def test_the_sentence_of_a_provider_that_is_down_is_the_server_s() -> None:
+    from lakana_server.api.platform.oidc_sign_in import UNREACHABLE_AT_START
+
+    sentence = UNREACHABLE_AT_START["sign_in"].format(provider="Keycloak")
+    assert f'"{sentence}"' in _page("sign-in-with-keycloak.md")
+
+
 def test_the_other_quoted_sentences_are_the_code_s() -> None:
     from lakana_core.identity.sessions import TOKEN_WINDOW_MESSAGE
 

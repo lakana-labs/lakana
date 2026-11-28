@@ -180,6 +180,17 @@ def test_an_unreachable_provider_is_unavailable() -> None:
     assert "could not be fetched" in unavailable(fetcher)
 
 
+def test_current_metadata_need_a_provider_that_answers_now() -> None:
+    """The start of a flow asks for current metadata; a callback keeps the cached ones."""
+    fetcher = serving()
+    client = provider(fetcher)
+    assert client.metadata(current=True).token_endpoint == f"{ISSUER}/token"
+    fetcher.documents[DISCOVERY] = FetchFailed("the host does not resolve")
+    assert client.metadata(current=True).issuer == ISSUER  # within the refresh interval
+    with pytest.raises(ProviderUnavailable):
+        provider(fetcher).metadata(current=True)
+
+
 def test_discovery_naming_another_issuer_is_unavailable() -> None:
     fetcher = serving(issuer="https://other.example")
     assert "could not be fetched" in unavailable(fetcher)
