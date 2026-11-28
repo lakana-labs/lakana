@@ -62,6 +62,10 @@ const NAMED_LIMITS = [
   // marks and note, Add rule's loader and the address that opens it, and the loaders of a rule's
   // page and Explain (CiTrustRulePage-, CiTrustExplain-, CiTrustDialogs-: on the shared limit).
   { name: "CI trust", prefix: "CiTrustRoutes-", limit: "5.53 kB" },
+  // #856: measured 3.32 kB (2026-11-28) + 10 %: a CI trust rule's page, its claims sorting.
+  { name: "a CI trust rule", prefix: "CiTrustRulePage-", limit: "3.65 kB" },
+  // #856: measured 3.43 kB (2026-11-28) + 10 %: Settings › Environments, its lists sorting.
+  { name: "the environments", prefix: "EnvironmentsRoutes-", limit: "3.77 kB" },
   // Measured 4.11 kB (2026-11-19) + 10 %: the dialogs of Settings › Environments (Create
   // environment, Set retention, Change storage, Delete environment, and a deleted environment's
   // Restore, Delete the files and Remove from the catalog), loaded when one is first opened.
@@ -79,7 +83,8 @@ const NAMED_LIMITS = [
   // of environment (typed by a person who may list none), table and who shared with Grants, the two lists with the Git mark, Delete
   // and its question, the managed note with both commands, and the place's strings); Add filter
   // or mask loads when it is opened (AddPolicyDialog-, on the shared limit).
-  { name: "Row filters & masks", prefix: "FiltersAndMasksPage-", limit: "4.65 kB" },
+  // #856: measured 4.84 kB (2026-11-28) + 10 %, its lists sorting by every column.
+  { name: "Row filters & masks", prefix: "FiltersAndMasksPage-", limit: "5.32 kB" },
   // Measured 3.26 kB (2026-11-18) + 10 %: Settings › Access › Secrets (the environment picker
   // over the environments where the person manages secrets, the remembered choice, the list with
   // each secret's use and Rotate, Set use and Delete, and the loaders of the dialogs); the
@@ -269,7 +274,8 @@ const NAMED_LIMITS = [
   // with the task page (useRun-, below).
   // Lowered to the measured 1.83 kB (2026-11-18) + 10 %: Cancel and Resume moved into a chunk the
   // run shares with the Jobs list (RunControls-, on the shared limit).
-  { name: "a run", prefix: "RunDetail-", limit: "2.01 kB" },
+  // #856: measured 2.06 kB (2026-11-28) + 10 %, its lists sorting by every column.
+  { name: "a run", prefix: "RunDetail-", limit: "2.26 kB" },
   // Measured 4.11 kB (2026-11-17) + 10 %: what a run and a task's page share: the run read every
   // 2 s while active, its title and breadcrumb, a task's row, its failure line with the code,
   // cause and next step, and the controls beside it (Log, Show source, Open table, Show rows),
@@ -283,7 +289,8 @@ const NAMED_LIMITS = [
   // ten columns with the outcomes in words) and its log, followed every 2 s from the byte offset,
   // caught up at most 16 pieces in a row, kept to 2,000,000 characters cut at a line, drawn in
   // memoised parts of 200 lines, with the command that prints it whole and Save log.
-  { name: "the task page", prefix: "TaskPage-", limit: "2.97 kB" },
+  // #856: measured 3.14 kB (2026-11-28) + 10 %, its lists sorting by every column.
+  { name: "the task page", prefix: "TaskPage-", limit: "3.46 kB" },
   // Measured 21.38 kB (2026-11-17) + 10 %: the result grid (React Aria's Table, the cells as
   // text, the Value panel, the masked and cut lines and the grid's strings), which the Preview
   // tab and the Queries screen share; loaded with the first of them.
@@ -350,7 +357,8 @@ const NAMED_LIMITS = [
   // Lowered to the measured 2.98 kB (2026-11-16) + 10 %: the list frame and the paging by cursor
   // moved into a chunk of their own (below) once an artifact's open uploads became their second
   // importer.
-  { name: "the Catalog's views", prefix: "ViewBody-", limit: "3.28 kB" },
+  // #856: measured 3.29 kB (2026-11-28) + 10 %, its lists sorting by every column.
+  { name: "the Catalog's views", prefix: "ViewBody-", limit: "3.62 kB" },
   // Measured 1.1 kB (2026-11-16) + 10 %: the list frame (skeleton, the server's sentence with Try
   // again, the empty sentence, the scrolling table and Show more) and the paging by cursor, which
   // the Catalog's views share with an artifact's open uploads.
@@ -483,7 +491,8 @@ const NAMED_LIMITS = [
   // the Health tab, its checks, signals, last maintenance
   // and readers (the names for an administrator, the count for everyone else) and the focus on
   // #readers. It loads only when the Health tab is opened.
-  { name: "the Health tab", prefix: "HealthTab-", limit: "2.64 kB" },
+  // #856: measured 2.65 kB (2026-11-28) + 10 %, its lists sorting by every column.
+  { name: "the Health tab", prefix: "HealthTab-", limit: "2.91 kB" },
   // Measured 2.24 kB (2026-11-13) + 10 %: the Access tab, what the person may do and why, and for
   // an administrator the grants level by level, the row filters and the column masks. It loads
   // only when the Access tab is opened.
@@ -493,7 +502,8 @@ const NAMED_LIMITS = [
   { name: "the Access tab", prefix: "AccessTab-", limit: "2.71 kB" },
   // Measured 1.01 kB (2026-11-16, `npm run size`) + 10 %: the References tab, its two flat panels of references,
   // the hidden counts and the focus after Try again. It loads only when the tab is opened.
-  { name: "the References tab", prefix: "ReferencesTab-", limit: "1.11 kB" },
+  // #856: measured 1.12 kB (2026-11-28) + 10 %, its lists sorting by every column.
+  { name: "the References tab", prefix: "ReferencesTab-", limit: "1.23 kB" },
   // Measured 3.04 kB (2026-11-16) + 10 %: an artifact's Versions tab, its versions 100 at a time
   // with current, who stored each and when, the deleted ones, Files one version at a time, the
   // whole version's command, Download with the size and SHA-256 check, the save under the file's

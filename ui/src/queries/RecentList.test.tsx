@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -105,5 +105,22 @@ describe("RecentList", () => {
       ["When", "sort=created&order=desc"],
       ["State", "sort=status&order=asc"],
     ]);
+  });
+
+  it("shows once a query a later page of a sort repeats", async () => {
+    const moved = aListedRun();
+    const other = aListedRun({ id: "2d3e4f50-6172-4c83-9da4-b5c6d7e8f9a0", status: "QUEUED" });
+    fakeServer({
+      [RECENT]: (request) =>
+        request.path.includes("cursor=c1")
+          ? { status: 200, body: { items: [moved, other], next_cursor: null } }
+          : { status: 200, body: { items: [moved], next_cursor: "c1" } },
+    });
+    renderRecent(null);
+    const region = await screen.findByRole("region", { name: "Recent queries" });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Show more" }));
+    await waitFor(() => {
+      expect(within(region).getAllByRole("row")).toHaveLength(3);
+    });
   });
 });

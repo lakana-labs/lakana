@@ -137,6 +137,7 @@ describe("HealthTab", () => {
               checkResult(),
               checkResult({ name: "amount_positive", outcome: "failed", failing_rows: 4 }),
               checkResult({ name: "fresh_daily", outcome: "warned", failing_rows: 1 }),
+              checkResult({ name: "z_newer", outcome: "deferred", failing_rows: null }),
             ],
             readers: READERS,
             signals: [
@@ -146,6 +147,13 @@ describe("HealthTab", () => {
                 signal: "null_rate",
                 column: "customer_email",
                 last_fired_at: "2026-11-12T06:06:00Z",
+              }),
+              // A newer server's signal, state and effect sort by the words it sent.
+              signalResult({
+                id: "0c7d7f0e-5c10-4b64-a3f0-5a0b9f6b1003",
+                signal: "drift",
+                state: "settling",
+                effect: "page",
               }),
             ],
           }),
@@ -159,17 +167,31 @@ describe("HealthTab", () => {
       "amount_positive",
       "fresh_daily",
       "unique_sale_id",
+      "z_newer",
     ]);
     await sortBy(user, checks, "Failing rows");
     expect(sortState(checks, "Failing rows")).toBe("descending");
-    expect(rows(checks).map((row) => row[2])).toEqual(["4", "1", "Not counted"]);
+    expect(
+      rows(checks)
+        .map((row) => row[2])
+        .slice(0, 2),
+    ).toEqual(["4", "1"]);
     await sortBy(user, checks, "Result");
-    expect(rows(checks).map((row) => row[1])).toEqual(["Failed", "Passed", "Warned"]);
+    expect(rows(checks).map((row) => row[0])).toEqual([
+      "z_newer",
+      "amount_positive",
+      "unique_sale_id",
+      "fresh_daily",
+    ]);
     await sortBy(user, checks, "Finished");
 
     const signals = await section("Signals");
     await sortBy(user, signals, "Column");
-    expect(rows(signals).map((row) => row[1])).toEqual(["Whole table", "customer_email"]);
+    expect(rows(signals).map((row) => row[1])).toEqual([
+      "Whole table",
+      "Whole table",
+      "customer_email",
+    ]);
     await sortBy(user, signals, "Last fired");
     expect(rows(signals).map((row) => row[1])[0]).toBe("customer_email");
     await sortBy(user, signals, "Signal");
