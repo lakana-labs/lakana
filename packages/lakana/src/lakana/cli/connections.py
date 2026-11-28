@@ -722,8 +722,8 @@ def list_connections(
     sort: Annotated[
         str | None,
         sort_option(
-            "created (the default, newest first), name or status (the last test: failed first, "
-            "then queued or running, then passed, never tested last)"
+            "created (the default, newest first), name, status (the last test: failed first, "
+            "then queued or running, then passed, never tested last), kind or environment"
         ),
     ] = None,
     order: ORDER = None,

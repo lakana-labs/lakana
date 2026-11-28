@@ -1165,7 +1165,7 @@ Answer fields: `LoadOut`
 
 List the dropped tables of a namespace
 
-Lists the tables dropped from the namespace whose files are not deleted yet and that can therefore still be restored. Needs `READ_TABLE` on the namespace. Answers 404 when the namespace does not exist.
+Lists the tables dropped from the namespace whose files are not deleted yet and that can therefore still be restored, newest drop first or in the order `sort` and `order` ask for. Needs `READ_TABLE` on the namespace. Answers 404 when the namespace does not exist and 422 for an unknown `sort` or `order`.
 
 Parameters:
 
@@ -1173,6 +1173,8 @@ Parameters:
 |---|---|---|---|---|
 | `env` | path | yes | text | Environment name. |
 | `path` | path | yes | text | Dot-joined namespace path. |
+| `sort` | query | no | text or null | What the list is sorted by: `dropped` (the default), `name` or `purge`. |
+| `order` | query | no | text or null | `asc` or `desc`; by default `desc` for `dropped`, `asc` for the others. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:
@@ -1189,7 +1191,7 @@ Answers:
 
 List the dropped tables of an environment
 
-Lists the tables dropped from any namespace of the environment whose files are not deleted yet, newest drop first. Needs `READ_ENVIRONMENT`; a table the caller may not read is left out. Answers 404 when the environment does not exist and 422 when the cursor is not one this list issued.
+Lists the tables dropped from any namespace of the environment whose files are not deleted yet, newest drop first or in the order `sort` and `order` ask for. Needs `READ_ENVIRONMENT`; a table the caller may not read is left out. Answers 404 when the environment does not exist and 422 when `sort` or `order` is unknown or the cursor is not one this list issued in this order.
 
 Parameters:
 
@@ -1198,6 +1200,8 @@ Parameters:
 | `env` | path | yes | text | Environment name. |
 | `limit` | query | no | whole number | Most tables returned (1 to 200). |
 | `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
+| `sort` | query | no | text or null | What the list is sorted by: `dropped` (the default), `name` (the table's name, then its namespace) or `purge` (when its files are deleted). |
+| `order` | query | no | text or null | `asc` or `desc`; by default `desc` for `dropped`, `asc` for the others. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:
@@ -1221,7 +1225,7 @@ Answer fields: `DroppedTablePageOut`
 
 List the tables about to expire
 
-Lists the managed tables of the environment that expire within `within_days`, soonest first. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 when `within_days` is out of range or the cursor is not one this list issued. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page.
+Lists the managed tables of the environment that expire within `within_days`, soonest first, or in the order `sort` and `order` ask for. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 when `within_days` is out of range, `sort` or `order` is unknown, or the cursor is not one this list issued in this order. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page.
 
 Parameters:
 
@@ -1232,6 +1236,8 @@ Parameters:
 | `namespace` | query | no | text or null | Only the tables of this dot-joined namespace and of the ones beneath it. |
 | `limit` | query | no | whole number | Most tables returned (1 to 200). |
 | `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page; send the same `within_days` and `namespace`. |
+| `sort` | query | no | text or null | What the list is sorted by: `expires` (the default) or `name` (the table's name, then its namespace). |
+| `order` | query | no | text or null | `asc` or `desc`; `asc` by default. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:

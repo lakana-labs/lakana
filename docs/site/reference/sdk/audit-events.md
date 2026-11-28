@@ -27,7 +27,7 @@ Filters are not part of the cursor: pass the same ones with every page. `iter` d
 | `limit` | `int` | `100` | The maximum number of events to return. Must be between 1 and 500 inclusive; an out-of-range value is rejected by the server with a 422. |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor`, to fetch the page after it. |
 | `kind` | `str | None` | `None` | Only return events of this kind, if given: ``connection`` is every ``CONNECTION_*`` type. With `event_type`, the type must be of the kind. |
-| `sort` | `str | None` | `None` | What the log is sorted by: ``occurred``, the only field. |
+| `sort` | `str | None` | `None` | What the log is sorted by: ``occurred`` (the default), ``event``, ``who`` or ``on`` (the environment, namespace and table); the events of one value come newest first. |
 | `order` | `str | None` | `None` | ``desc`` (the default, the newest first) or ``asc``, the oldest first. Every order lists the same events. |
 
 Returns: `AuditEventPage`. Up to `limit` matching events, and the cursor for the next page.
@@ -52,7 +52,7 @@ Yield every matching audit event, newest first, fetching pages as needed.
 | `until` | `datetime | None` | `None` | Only yield events at or before this time, if given. |
 | `page_size` | `int` | `100` | Events per request, between 1 and 500 inclusive. |
 | `kind` | `str | None` | `None` | Only yield events of this kind, if given: ``connection`` is every ``CONNECTION_*`` type. |
-| `sort` | `str | None` | `None` | What the log is sorted by: ``occurred``, the only field. |
+| `sort` | `str | None` | `None` | What the log is sorted by: ``occurred`` (the default), ``event``, ``who`` or ``on`` (the environment, namespace and table); the events of one value come newest first. |
 | `order` | `str | None` | `None` | ``desc`` (the default, the newest first) or ``asc``, the oldest first. Every order lists the same events. |
 
 Yields: `AuditEvent`. Each matching event, once.

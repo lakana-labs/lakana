@@ -9,7 +9,7 @@ These routes of the platform API come from its [OpenAPI document](../openapi.jso
 
 List the queries of an environment
 
-Lists running queries first, then queued ones, then, when asked, ended ones. Needs `SUBMIT_QUERY` on the environment, or `MANAGE_ENVIRONMENT`. A holder of `MANAGE_ENVIRONMENT` sees every query of the environment; everyone else sees the queries they submitted. The list never shows SQL text, error messages or results. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same filters with every page. Answers 404 when the environment does not exist, and 422 for an unknown status or origin or a `since` without a time zone. Answers 503 when a manager's page shows someone else's queries and the audit entry for that could not be written; nothing is listed then.
+Lists running queries first, then queued ones, then, when asked, ended ones. Needs `SUBMIT_QUERY` on the environment, or `MANAGE_ENVIRONMENT`. A holder of `MANAGE_ENVIRONMENT` sees every query of the environment; everyone else sees the queries they submitted. The list never shows SQL text, error messages or results. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same filters with every page. Answers 404 when the environment does not exist, and 422 for an unknown status or origin, a `since` without a time zone, an unknown `sort` or `order`, or a cursor of another order. Answers 503 when a manager's page shows someone else's queries and the audit entry for that could not be written; nothing is listed then.
 
 Parameters:
 
@@ -23,6 +23,8 @@ Parameters:
 | `since` | query | no | text (date-time) or null | The ended queries listed are those that ended at or after this ISO 8601 time, with a time zone (`2026-10-18T00:00:00Z`), of any age, instead of those of the last 24 hours; given, they are listed with or without `include_ended`. |
 | `limit` | query | no | whole number | Most rows returned (1 to 200). |
 | `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page. |
+| `sort` | query | no | text or null | `created` (when submitted) or `status`, in one order for every state; without `sort` and `order`, the list's own order. |
+| `order` | query | no | text or null | `asc` or `desc`; by default `desc` for `created`, `asc` for `status`. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:
@@ -244,6 +246,8 @@ Parameters:
 | `since` | query | no | text (date-time) or null | The ended queries listed are those that ended at or after this ISO 8601 time, with a time zone, of any age, instead of those of the last 24 hours; given, they are listed with or without `include_ended`. |
 | `limit` | query | no | whole number | Most rows returned (1 to 200). |
 | `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
+| `sort` | query | no | text or null | What the list is sorted by, with the fields of the list of one environment. |
+| `order` | query | no | text or null | `asc` or `desc`, each field's way by default, as on the list of one environment. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:

@@ -296,8 +296,9 @@ class Deploys:
         cursor
             A previous page's `next_cursor`. Send the same `repository` with every page.
         sort
-            What the deploys are sorted by: ``created`` (the default) or ``status``, whose
-            deploys of one state come newest first. Send the same sort with every page.
+            What the deploys are sorted by: ``created`` (the default), ``status``, ``kind``,
+            ``repository`` or ``who`` (whoever asked for it); the deploys of one value come
+            newest first. Send the same sort with every page.
         order
             ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for ``status``.
 

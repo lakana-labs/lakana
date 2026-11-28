@@ -19,7 +19,7 @@ List the jobs of the deployed repositories (needs `READ_ENVIRONMENT`).
 |---|---|---|---|
 | `environment` | `str` | required | Environment name. |
 | `repository` | `str | None` | `None` | Only this repository's jobs. |
-| `sort` | `str | None` | `None` | What the jobs are sorted by: ``name``, ``status`` (the last run's), ``last_run`` or ``next_run``; a job without a value comes last. Without it (and `order`), by repository, then name. |
+| `sort` | `str | None` | `None` | What the jobs are sorted by: ``name``, ``status`` (the last run's), ``last_run``, ``next_run``, ``repository``, ``environment`` or ``schedule`` (the cron expression, then its zone); a job without a value comes last. Without it (and `order`), by repository, then name. |
 | `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``last_run``, ``asc`` for the others. |
 
 Returns: `list of Job`. By repository, then name, unless sorted otherwise.

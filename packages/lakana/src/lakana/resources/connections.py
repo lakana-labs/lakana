@@ -488,8 +488,9 @@ class Connections:
             A previous page's `next_cursor`.
         sort
             What the connections are sorted by: ``created`` (the default), ``name`` (in any
-            letter case) or ``status``, the last test: failed first, then queued or running,
-            then passed, never tested last. Send the same sort with every page.
+            letter case), ``status`` (the last test: failed first, then queued or running,
+            then passed, never tested last), ``kind`` or ``environment``; the connections of
+            one value by name. Send the same sort with every page.
         order
             ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
 

@@ -99,20 +99,41 @@ one environment by the list of every environment. Start again without `cursor`.
 ## Sorting
 
 Every list that can grow long sorts by a column on the server, so the order holds across every
-page: `--sort FIELD` and `--order asc|desc` on the command line, `sort` and `order` in the SDK and
-on the route. Without them a list keeps its own order, and without `--order` a field runs in its
-own direction. In the web interface the same order is chosen by pressing a column's header, and it
-stays in the address, so a shared link opens sorted the same way.
+page: `sort` and `order` on the route, and for the lists with a command also `--sort FIELD` and
+`--order asc|desc` on the command line and `sort` and `order` in the SDK. Without them a list
+keeps its own order, and without `order` a field runs in its own direction. In the web interface
+the same order is chosen by pressing a column's header, and it stays in the address, so a shared
+link opens sorted the same way. A screen that shows two lists keeps each one's sort under its own
+name (`grantsSort`, `membersSort`, …).
 
 | List | Command | Fields (default first) | Without `--order` |
 |---|---|---|---|
-| Runs, of one environment or every one | `lakana runs list` | `created`, `name` (the job's, else the repository's), `status` | `created` newest first; the others from A, runs of one name or state newest first |
-| Deploys, of one environment or every one | `lakana deploys list` | `created`, `status` | `created` newest first; `status` from A, deploys of one state newest first |
-| Jobs | `lakana job list` | `name`, `status` (the last run's), `last_run`, `next_run`; by repository, then name, without `--sort` | `last_run` latest first; the others from A or soonest first; a job without a value last |
-| Connections, of one environment or every one | `lakana connection list` | `created`, `name`, `status` (the last test: failed first, then queued or running, then passed, never tested last) | `created` newest first; the others ascending, one state by name |
+| Runs, of one environment or every one | `lakana runs list` | `created`, `name` (the job's, else the repository's), `status`, `environment`, `trigger` (what started it; a run started with `lakana run` has none and comes last), `duration` (from its start to its end, or to now while it runs; one not started last), `tasks` (how many) | `created`, `duration` and `tasks` from the largest; the others from A; runs of one value newest first |
+| Deploys, of one environment or every one | `lakana deploys list` | `created`, `status`, `kind`, `repository`, `who` (whoever asked for it; a deploy whose submitter was deleted last) | `created` newest first; the others from A, deploys of one value newest first |
+| Jobs | `lakana job list` | `name`, `status` (the last run's), `last_run`, `next_run`, `repository`, `environment`, `schedule` (the cron expression as written, then its time zone); by repository, then name, without `--sort` | `last_run` latest first; the others from A or soonest first; a job without a value (never run, no next run, run by hand) last |
+| Connections, of one environment or every one | `lakana connection list` | `created`, `name`, `status` (the last test: failed first, then queued or running, then passed, never tested last), `kind`, `environment` | `created` newest first; the others ascending, one state, kind or environment by name |
 | Saved queries, of one environment or every one | `lakana query saved list` | `name`, `updated`, `created` | `name` from A; the times latest first |
 | Principals (Access › People) | `lakana principal list` | `created`, `name`, `status` (active first, then by name) | `created` newest first; the others ascending |
-| Audit log | `lakana audit list` | `occurred` (only `--order`) | newest first; `asc` is oldest first |
+| Audit log | `lakana audit list` (only `--order`) | `occurred`, `event` (the type), `who` (an event of no principal last), `on` (the environment, namespace and table; an event on the whole instance first) | newest first; `asc` is oldest first; the others from A, events of one value newest first |
+| Queries, of one environment or every one | route only | `created` (when submitted), `status`, one order for every state; without `sort`, running, then queued, then ended | `created` newest first; `status` from A, one state newest first |
+| Grants (Access › Grants, a group's grants, a table's Access tab) | route only | `granted`, `who` (the person's or group's name), `what` (the role or action), `on` (the environment, namespace and table; a grant on the whole instance first) | `granted` newest first; the others from A, grants of one value newest first |
+| Groups | route only | `created`, `name` | `created` newest first; `name` from A |
+| Row filters and column masks | route only | `created`, `who`, `on`, and for column masks `column` | `created` newest first; the others from A, policies of one value newest first |
+| Every owner's live tokens (Access › Tokens) | route only | `created`, `owner`, `name`, `last_used`, `expires` (a token never used, or that never ends, last) | `created` and `last_used` latest first; the others from A or soonest first |
+| Live task tokens | route only | `issued`, `environment`, `purpose` (the job of its run, else its asset; one minted by hand last), `principal` (whom it acts as), `expires` | `issued` newest first; the others from A or soonest first |
+| Dropped tables, of an environment or a namespace | route only | `dropped`, `name` (the table's, then its namespace), `purge` (when its files are deleted) | `dropped` latest first; the others from A or soonest first |
+| Expiring tables | route only | `expires` (then the dotted name), `name` | ascending |
+| Orphans | route only | `repository` (then the table), `name` (the table's), `kind` (one of no known kind last) | ascending |
+
+The web interface sorts the short lists it holds whole in the browser instead: a group's members,
+an artifact's open uploads (at most 16), and the lists of Settings and of a table's pages. A
+column whose values have no order that means something does not sort: a commit's hash, an
+upload's id, free-text notes, reasons and descriptions, the expression of a row filter or a
+column mask, the details of an audit event, the why of an expiring table, a connection's address
+and how many projects use it, and a health signal's observed value and band. Home's panels and
+the Jobs page's Running now and Failed sections keep their own order: they are the newest few.
+The raw file browser of a place lists what the object store answers, a folder at a time, in the
+store's own order, and does not sort.
 
 Names sort by code point after lower-casing, so `alpha`, `Beta`, `gamma` come in that order. Only
 the letters A to Z are lower-cased the same everywhere: SQLite lower-cases ASCII letters only,

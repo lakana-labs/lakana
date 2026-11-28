@@ -44,7 +44,7 @@ List one page of an environment's connections, newest first.
 | `environment` | `str` | required | The environment. |
 | `limit` | `int | None` | `None` | Most connections returned (1 to 200); `None` leaves it to the server (100). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor`. |
-| `sort` | `str | None` | `None` | What the connections are sorted by: ``created`` (the default), ``name`` (in any letter case) or ``status``, the last test: failed first, then queued or running, then passed, never tested last. Send the same sort with every page. |
+| `sort` | `str | None` | `None` | What the connections are sorted by: ``created`` (the default), ``name`` (in any letter case), ``status`` (the last test: failed first, then queued or running, then passed, never tested last), ``kind`` or ``environment``; the connections of one value by name. Send the same sort with every page. |
 | `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others. |
 
 Returns: `ConnectionPage`. The connections, and the cursor of the next page (`None` on the last).

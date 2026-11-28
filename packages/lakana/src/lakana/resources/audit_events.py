@@ -92,7 +92,9 @@ class AuditEvents:
             Only return events of this kind, if given: ``connection`` is every
             ``CONNECTION_*`` type. With `event_type`, the type must be of the kind.
         sort
-            What the log is sorted by: ``occurred``, the only field.
+            What the log is sorted by: ``occurred`` (the default), ``event``, ``who`` or
+            ``on`` (the environment, namespace and table); the events of one value come newest
+            first.
         order
             ``desc`` (the default, the newest first) or ``asc``, the oldest first. Every order
             lists the same events.
@@ -164,7 +166,9 @@ class AuditEvents:
             Only yield events of this kind, if given: ``connection`` is every
             ``CONNECTION_*`` type.
         sort
-            What the log is sorted by: ``occurred``, the only field.
+            What the log is sorted by: ``occurred`` (the default), ``event``, ``who`` or
+            ``on`` (the environment, namespace and table); the events of one value come newest
+            first.
         order
             ``desc`` (the default, the newest first) or ``asc``, the oldest first. Every order
             lists the same events.

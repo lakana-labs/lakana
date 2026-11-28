@@ -453,7 +453,8 @@ def list_deploys(
     sort: Annotated[
         str | None,
         sort_option(
-            "created (the default, newest first) or status; deploys of one state come newest first"
+            "created (the default, newest first), status, kind, repository or who; deploys of "
+            "one value come newest first"
         ),
     ] = None,
     order: ORDER = None,

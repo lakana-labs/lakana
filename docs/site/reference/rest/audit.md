@@ -24,8 +24,8 @@ Parameters:
 | `until` | query | no | text (date-time) or null | Only return events at or before this time, if given. |
 | `limit` | query | no | whole number | The maximum number of events to return. Defaults to 100, must be between 1 and 500 inclusive; an out-of-range value is rejected with a 422 rather than silently clamped or ignored. |
 | `cursor` | query | no | text or null | A previous page's `next_cursor`, to fetch the page after it. |
-| `sort` | query | no | text or null | What the log is sorted by: `occurred`, the only field. |
-| `order` | query | no | text or null | `desc` (the newest first, the default) or `asc` (the oldest first). |
+| `sort` | query | no | text or null | What the log is sorted by: `occurred` (the default), `event` (the type), `who` (the principal's name; an event of none last) or `on` (the environment, namespace and table; an event on the whole instance first); the events of one value newest first. |
+| `order` | query | no | text or null | For `occurred`, `desc` (the newest first, the default) or `asc` (the oldest first); `asc` by default for the others. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:

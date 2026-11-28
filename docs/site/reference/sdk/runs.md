@@ -46,7 +46,7 @@ The runs of one page; `list_page` also returns the cursor of the next one, and `
 | `trigger` | `str | Sequence[str] | None` | `None` | Only runs started this way or one of these (``schedule``, ``api``, ``manual``, ``deploy``). |
 | `job` | `str | None` | `None` | Only runs of this job. |
 | `since` | `datetime | None` | `None` | Only runs created at or after this time, which needs a time zone. |
-| `sort` | `str | None` | `None` | What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else the repository's, in any letter case) or ``status``; runs of one name or state come newest first. Send the same sort with every page. |
+| `sort` | `str | None` | `None` | What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else the repository's, in any letter case), ``status``, ``environment``, ``trigger``, ``duration`` (the longest first) or ``tasks`` (the most first); runs of one value come newest first. Send the same sort with every page. |
 | `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others. |
 | `limit` | `int | None` | `None` | Most runs returned (1 to 200); `None` leaves it to the server (100). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same filters with every page. |
@@ -71,7 +71,7 @@ List one page of runs, newest first, with the cursor of the next page.
 | `trigger` | `str | Sequence[str] | None` | `None` | Only runs started this way or one of these (``schedule``, ``api``, ``manual``, ``deploy``). |
 | `job` | `str | None` | `None` | Only runs of this job. |
 | `since` | `datetime | None` | `None` | Only runs created at or after this time, which needs a time zone. |
-| `sort` | `str | None` | `None` | What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else the repository's, in any letter case) or ``status``; runs of one name or state come newest first. Send the same sort with every page. |
+| `sort` | `str | None` | `None` | What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else the repository's, in any letter case), ``status``, ``environment``, ``trigger``, ``duration`` (the longest first) or ``tasks`` (the most first); runs of one value come newest first. Send the same sort with every page. |
 | `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others. |
 | `limit` | `int | None` | `None` | Most runs returned (1 to 200); `None` leaves it to the server (100). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same filters with every page. |
@@ -96,7 +96,7 @@ Yield every matching run, newest first, fetching pages as needed.
 | `trigger` | `str | Sequence[str] | None` | `None` | Only runs started this way or one of these. |
 | `job` | `str | None` | `None` | Only runs of this job. |
 | `since` | `datetime | None` | `None` | Only runs created at or after this time, which needs a time zone. |
-| `sort` | `str | None` | `None` | What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else the repository's, in any letter case) or ``status``; runs of one name or state come newest first. Send the same sort with every page. |
+| `sort` | `str | None` | `None` | What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else the repository's, in any letter case), ``status``, ``environment``, ``trigger``, ``duration`` (the longest first) or ``tasks`` (the most first); runs of one value come newest first. Send the same sort with every page. |
 | `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others. |
 | `page_size` | `int` | `100` | Runs per request (1 to 200). |
 
@@ -118,7 +118,7 @@ The environments are those where you hold `READ_ENVIRONMENT`; one where you do n
 | `trigger` | `str | Sequence[str] | None` | `None` | Only runs started this way or one of these (``schedule``, ``api``, ``manual``, ``deploy``). |
 | `job` | `str | None` | `None` | Only runs of this job. |
 | `since` | `datetime | None` | `None` | Only runs created at or after this time, which needs a time zone. |
-| `sort` | `str | None` | `None` | What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else the repository's, in any letter case) or ``status``; runs of one name or state come newest first. Send the same sort with every page. |
+| `sort` | `str | None` | `None` | What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else the repository's, in any letter case), ``status``, ``environment``, ``trigger``, ``duration`` (the longest first) or ``tasks`` (the most first); runs of one value come newest first. Send the same sort with every page. |
 | `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others. |
 | `limit` | `int | None` | `None` | Most runs returned (1 to 200); `None` leaves it to the server (100). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor` of this list. Send the same filters with every page. |
@@ -145,7 +145,7 @@ Yield every matching run of every environment you may read, fetching pages as ne
 | `trigger` | `str | Sequence[str] | None` | `None` | Only runs started this way or one of these. |
 | `job` | `str | None` | `None` | Only runs of this job. |
 | `since` | `datetime | None` | `None` | Only runs created at or after this time, which needs a time zone. |
-| `sort` | `str | None` | `None` | What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else the repository's, in any letter case) or ``status``; runs of one name or state come newest first. Send the same sort with every page. |
+| `sort` | `str | None` | `None` | What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else the repository's, in any letter case), ``status``, ``environment``, ``trigger``, ``duration`` (the longest first) or ``tasks`` (the most first); runs of one value come newest first. Send the same sort with every page. |
 | `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others. |
 | `page_size` | `int` | `100` | Runs per request (1 to 200). |
 

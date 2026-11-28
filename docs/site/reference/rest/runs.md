@@ -87,8 +87,8 @@ Parameters:
 | `since` | query | no | text (date-time) or null | Only runs created at or after this ISO 8601 time, with a time zone (`2026-10-18T00:00:00Z`). |
 | `limit` | query | no | whole number | Most runs returned (1 to 200). |
 | `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page. |
-| `sort` | query | no | text or null | What the list is sorted by: `created` (the default), `name` (the job's, else the repository's, in any letter case) or `status`; runs of one name or state come newest first. |
-| `order` | query | no | text or null | `asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the others. |
+| `sort` | query | no | text or null | What the list is sorted by: `created` (the default), `name` (the job's, else the repository's, in any letter case), `status`, `environment`, `trigger` (a run started with `lakana run`, which has none, last), `duration` (to now for one still going; one not started last) or `tasks` (how many); runs of one value come newest first. |
+| `order` | query | no | text or null | `asc` or `desc`; by default `desc` for `created` (the newest first), `duration` (the longest first) and `tasks` (the most first), `asc` for the others. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:

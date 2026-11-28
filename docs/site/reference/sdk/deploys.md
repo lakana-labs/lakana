@@ -79,7 +79,7 @@ List one page of an environment's deploy history, with the cursor of the next pa
 | `repository` | `str | None` | `None` | Only this repository's deploys. |
 | `limit` | `int | None` | `None` | Most deploys returned (1 to 200); `None` leaves it to the server (100). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same `repository` with every page. |
-| `sort` | `str | None` | `None` | What the deploys are sorted by: ``created`` (the default) or ``status``, whose deploys of one state come newest first. Send the same sort with every page. |
+| `sort` | `str | None` | `None` | What the deploys are sorted by: ``created`` (the default), ``status``, ``kind``, ``repository`` or ``who`` (whoever asked for it); the deploys of one value come newest first. Send the same sort with every page. |
 | `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for ``status``. |
 
 Returns: `DeployPage`. The deploys, newest first, and the cursor for the next page (`None` on the last).

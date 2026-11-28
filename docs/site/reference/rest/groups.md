@@ -47,7 +47,7 @@ Answer fields: `GroupOut`
 
 List groups
 
-Lists the groups, newest first. `member` lists only the groups that principal belongs to now, and answers 404 when no principal has that name. Needs the `ADMIN` role on the instance. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page.
+Lists the groups, newest first, or in the order `sort` and `order` ask for. `member` lists only the groups that principal belongs to now, and answers 404 when no principal has that name. Needs the `ADMIN` role on the instance. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page. Answers 422 for an unknown `sort` or `order`, or a cursor this list did not issue in this order; send the same sort with every page.
 
 Parameters:
 
@@ -57,6 +57,8 @@ Parameters:
 | `member` | query | no | text or null | Only the groups this principal belongs to. |
 | `limit` | query | no | whole number | Most groups returned (1 to 200). |
 | `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page; send the same `q` and `member`. |
+| `sort` | query | no | text or null | What the list is sorted by: `created` (the default) or `name`. |
+| `order` | query | no | text or null | `asc` or `desc`; by default `desc` for `created`, `asc` for `name`. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:
