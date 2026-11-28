@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 
-import { consoleErrors, signInAsAdmin, STUBBED, tabTo, violations } from "./session";
+import { consoleErrors, signInAsAdmin, STUBBED, SUB_PIXEL, tabTo, violations } from "./session";
 
 const KEY = "lakana.preferences";
 const TABLE = "/catalog/prod/gold.sales/fact_sales";
@@ -280,7 +280,7 @@ for (const theme of ["light", "dark"] as const) {
   });
 }
 
-test.describe("the table page in real Chromium", () => {
+test.describe("the table page", () => {
   test.beforeEach(async ({ page }) => {
     await signInAsAdmin(page);
   });
@@ -949,7 +949,7 @@ test.describe("the table page in real Chromium", () => {
       };
     });
     expect(sizes.wanted).toBeGreaterThan(600);
-    expect(sizes.rendered).toBeGreaterThanOrEqual(sizes.wanted);
+    expect(sizes.rendered).toBeGreaterThanOrEqual(sizes.wanted - SUB_PIXEL);
     expect(sizes.scrollWidth).toBeGreaterThan(sizes.clientWidth);
     expect(await violations(page), "the full-screen region").toEqual([]);
   });

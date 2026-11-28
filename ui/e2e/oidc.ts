@@ -1,7 +1,7 @@
 /**
  * Stubs of sign-in through the organisation's identity provider (#32) for the browser checks:
  * the provider's answer, the flows' starts and finishes, and the provider's own page, which
- * answers a 303 back to the interface's return page as a real provider does after sign-in.
+ * sends the browser back to the interface's return page as a real provider does after sign-in.
  *
  * @packageDocumentation
  */
@@ -129,12 +129,18 @@ export async function stubProvider(
       route.fulfill({ json: { authorization_url: `${PROVIDER_URL}?flow=${path}` } }),
     );
   }
-  // The provider signs the person in and sends the browser back, as a real one does.
+  // The provider signs the person in and sends the browser back, as a real one does. A page that
+  // replaces itself with the return address stands in for the provider's 303: WebKit cannot
+  // fulfil a stubbed redirect ("Cannot fulfill with redirect status"), and `location.replace`
+  // leaves the provider out of the history as the redirect does, so Back behaves the same.
   await page.route(`${PROVIDER_URL}**`, (route) => {
     const flow = new URL(route.request().url()).searchParams.get("flow") ?? "start";
     const origin = new URL(page.url()).origin;
     const back = flow === "start" ? "/sign-in/oidc" : "/sign-in/oidc/confirmed";
-    return route.fulfill({ status: 303, headers: { location: `${origin}${back}` } });
+    return route.fulfill({
+      contentType: "text/html",
+      body: `<!doctype html><script>location.replace(${JSON.stringify(`${origin}${back}`)});</script>`,
+    });
   });
   await page.route("**/api/v1/sign-in/oidc/finish", (route) => {
     if (world.refuse !== null) {

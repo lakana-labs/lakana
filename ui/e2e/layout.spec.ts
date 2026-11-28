@@ -9,7 +9,7 @@ import { FAILED_ID, stubJobs, TIMED_OUT } from "./jobs";
 import { stubProvider } from "./oidc";
 import { SALES_SQL, stubQueries } from "./queries";
 import { stubRepositories } from "./repositories";
-import { signInAsAdmin } from "./session";
+import { signInAsAdmin, SUB_PIXEL } from "./session";
 import { SHOTS } from "./visual/shots";
 
 // One compact density, full-width screens and the alignment rules of #782
@@ -240,7 +240,7 @@ test("a state is a small pill: its glyph and its word on a tinted ground", async
   const pill = page.locator(".list .pill").first();
   await expect(pill).toBeVisible();
   const box = await pill.boundingBox();
-  expect(box?.height ?? 0).toBeLessThanOrEqual(20);
+  expect(box?.height ?? 0).toBeLessThanOrEqual(20 + SUB_PIXEL);
   await expect(pill.locator("svg")).toHaveAttribute("width", "12");
 });
 

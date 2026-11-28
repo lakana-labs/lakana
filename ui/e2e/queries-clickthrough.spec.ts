@@ -407,10 +407,20 @@ test.describe("the Queries screen, checked by clicking through", () => {
       await page.keyboard.press("Tab");
     }
     expect(await grid.evaluate((node) => node.contains(document.activeElement))).toBe(true);
-    expect(await scroll.evaluate((node) => node.scrollLeft)).toBe(0);
-    // To the row's last column: the region scrolls to keep the focused cell in sight.
-    await page.keyboard.press("End");
-    await expect.poll(() => scroll.evaluate((node) => node.scrollLeft)).toBeGreaterThan(0);
+    // The Tab stop is the first row. Where the region stands then is the browser's: WebKit
+    // scrolls the row into view, which at 320 px leaves it at 249 px, where Chromium and Firefox
+    // stay at 0. The arrow keys are checked from the row's first data cell, which every browser
+    // brings to the left edge.
+    const scrollLeft = (): Promise<number> => scroll.evaluate((node) => node.scrollLeft);
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    await expect(page.getByRole("gridcell").first()).toBeFocused();
+    await expect.poll(scrollLeft).toBe(0);
+    // One column on: the region scrolls to keep the focused cell in sight, and back again.
+    await page.keyboard.press("ArrowRight");
+    await expect.poll(scrollLeft).toBeGreaterThan(0);
+    await page.keyboard.press("ArrowLeft");
+    await expect.poll(scrollLeft).toBe(0);
   });
 
   test("a name pasted from two lines becomes one line with a space", async ({
