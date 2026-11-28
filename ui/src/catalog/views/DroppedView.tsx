@@ -11,7 +11,10 @@ import { Link, useLocation } from "react-router";
 import { ApiError, type TableOut } from "../../api";
 import { type DroppedTableOut, listDropped, undropTable } from "../../api/manage";
 import "../actions/actionStrings";
+import type { ListSortSpec } from "../../shell/listSort";
 import { PendingButton } from "../../shell/PendingButton";
+import { SortHeader } from "../../shell/SortHeader";
+import { useListSort } from "../../shell/useListSort";
 import { markedName, markedText, VisibleText } from "../../shell/VisibleText";
 import { problemText } from "../../sign-in/messages";
 import { UndropDialog } from "../actions/UndropDialog";
@@ -21,6 +24,13 @@ import { tablePath } from "../paths";
 import { useCursorPages } from "./useCursorPages";
 import { ViewList } from "./ViewList";
 import "./viewStrings";
+
+/** The columns the dropped tables sort by, on the server; their own order is the latest first. */
+const DROPPED_SORTS: ListSortSpec<"name" | "dropped" | "purge"> = {
+  fields: { name: "asc", dropped: "desc", purge: "asc" },
+  natural: { field: "dropped", order: "desc" },
+  param: "dropped",
+};
 
 /** Properties of {@link DroppedView}. */
 export interface DroppedViewProps {
@@ -55,7 +65,14 @@ interface Result {
 export function DroppedView({ environment, namespace, onChanged }: DroppedViewProps): JSX.Element {
   const { t } = useTranslation();
   const key = `${environment}\u0000${namespace ?? ""}`;
-  const pages = useCursorPages(key, (cursor) => listDropped(environment, namespace, cursor));
+  const sorting = useListSort(DROPPED_SORTS);
+  const sort = sorting.choice;
+  // A new sort reads the first page again; the rows stay until it arrives.
+  const pages = useCursorPages(
+    key,
+    (cursor) => listDropped(environment, namespace, cursor, sort),
+    JSON.stringify(sort),
+  );
   const protectedEnvironment = useProtected(environment);
   const fromDrop = (useLocation().state as { dropped?: string } | null)?.dropped;
   const [restored, setRestored] = useState<Result | null>(null);
@@ -165,9 +182,15 @@ export function DroppedView({ environment, namespace, onChanged }: DroppedViewPr
         }}
         head={
           <tr>
-            <th scope="col">{t("catalog.views.dropped.columns.table")}</th>
-            <th scope="col">{t("catalog.views.dropped.columns.dropped")}</th>
-            <th scope="col">{t("catalog.views.dropped.columns.until")}</th>
+            <SortHeader {...sorting.header("name")}>
+              {t("catalog.views.dropped.columns.table")}
+            </SortHeader>
+            <SortHeader {...sorting.header("dropped")}>
+              {t("catalog.views.dropped.columns.dropped")}
+            </SortHeader>
+            <SortHeader {...sorting.header("purge")}>
+              {t("catalog.views.dropped.columns.until")}
+            </SortHeader>
             <th scope="col">
               <span className="visually-hidden">{t("catalog.views.dropped.columns.actions")}</span>
             </th>

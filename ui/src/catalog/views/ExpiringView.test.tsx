@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { manageRoutes, retention } from "../../test/manage";
 import { renderShell } from "../../test/render";
+import { expectServerSorts } from "../../test/sorting";
 
 const ADDRESS = "/catalog?view=expiring&env=prod";
 const LIST = "GET /api/v1/environments/prod/expiring-tables";
@@ -211,5 +212,17 @@ describe("ExpiringView", () => {
     ).toBeInTheDocument();
     expect(await screen.findByText("Nothing expires soon in goU+202Eld.")).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/[\u202E\u2066]/u);
+  });
+});
+
+describe("ExpiringView's sort", () => {
+  it("sorts by table and by when on the server; the why does not sort", async () => {
+    const { user, server } = renderShell(ADDRESS, { routes: manageRoutes() });
+    const region = await screen.findByRole("region", { name: "Expiring tables" });
+    expect(within(region).queryByRole("button", { name: "Why" })).toBeNull();
+    await expectServerSorts(user, region, server.sent, "/api/v1/environments/prod/expiring", [
+      ["Table", "sort=name&order=asc"],
+      ["Table", "sort=name&order=desc"],
+    ]);
   });
 });

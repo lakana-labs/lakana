@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { manageRoutes, orphan } from "../../test/manage";
 import { renderShell } from "../../test/render";
+import { expectServerSorts } from "../../test/sorting";
 
 const ADDRESS = "/catalog?view=orphans&env=prod";
 const LIST = "GET /api/v1/environments/prod/orphans";
@@ -338,5 +339,17 @@ describe("OrphansView", () => {
     ).toBeInTheDocument();
     expect(await screen.findByText("No project left an orphan in prU+2066od.")).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/[\u202E\u2066]/u);
+  });
+});
+
+describe("OrphansView's sort", () => {
+  it("sorts by table and kind on the server; by repository is the list's own order", async () => {
+    const { user, server } = renderShell(ADDRESS, { routes: manageRoutes() });
+    const region = await screen.findByRole("region", { name: "Orphans" });
+    await expectServerSorts(user, region, server.sent, "/api/v1/environments/prod/orphans", [
+      ["Table", "sort=name&order=asc"],
+      ["Kind", "sort=kind&order=asc"],
+      ["Kind", "sort=kind&order=desc"],
+    ]);
   });
 });

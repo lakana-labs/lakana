@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { dropped, manageRoutes } from "../../test/manage";
 import { held } from "../../test/pending";
 import { renderShell } from "../../test/render";
+import { expectServerSorts } from "../../test/sorting";
 import { table } from "../../test/table";
 
 const ADDRESS = "/catalog?view=dropped&env=prod";
@@ -545,5 +546,17 @@ describe("DroppedView", () => {
       "A table fact_U+202Ereturns already exists.",
     );
     expect(dialog.textContent).not.toMatch(/[\u202E\u2066]/u);
+  });
+});
+
+describe("DroppedView's sort", () => {
+  it("sorts by table, drop and the end of its undo period on the server", async () => {
+    const { user, server } = renderShell(ADDRESS, { routes: manageRoutes() });
+    const region = await screen.findByRole("region", { name: "Dropped tables" });
+    await expectServerSorts(user, region, server.sent, "/api/v1/environments/prod/dropped", [
+      ["Table", "sort=name&order=asc"],
+      ["Restorable until", "sort=purge&order=asc"],
+      ["Restorable until", "sort=purge&order=desc"],
+    ]);
   });
 });

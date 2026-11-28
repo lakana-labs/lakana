@@ -8,6 +8,9 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import { listExpiring } from "../../api/manage";
+import type { ListSortSpec } from "../../shell/listSort";
+import { SortHeader } from "../../shell/SortHeader";
+import { useListSort } from "../../shell/useListSort";
 import { markedName, VisibleText } from "../../shell/VisibleText";
 import { openFromCell, When } from "../cells";
 import { tablePath } from "../paths";
@@ -15,6 +18,13 @@ import { retentionWords } from "../retention";
 import { useCursorPages } from "./useCursorPages";
 import { ViewList } from "./ViewList";
 import "./viewStrings";
+
+/** The columns the expiring tables sort by, on the server; their own order is the soonest first. */
+const EXPIRING_SORTS: ListSortSpec<"name" | "expires"> = {
+  fields: { name: "asc", expires: "asc" },
+  natural: { field: "expires", order: "asc" },
+  param: "expiring",
+};
 
 /** Properties of {@link ExpiringView}. */
 export interface ExpiringViewProps {
@@ -25,7 +35,7 @@ export interface ExpiringViewProps {
 }
 
 /**
- * Renders the list, soonest first as the server sorts it. A table already past its expiry says
+ * Renders the list, soonest first as the server sorts it, or by the column pressed. A table already past its expiry says
  * "Due now"; the why is the sentence of the Retention dialog.
  *
  * @param props - The place.
@@ -35,8 +45,13 @@ export interface ExpiringViewProps {
  */
 export function ExpiringView({ environment, namespace }: ExpiringViewProps): JSX.Element {
   const { t } = useTranslation();
-  const pages = useCursorPages(`${environment}\u0000${namespace ?? ""}`, (cursor) =>
-    listExpiring(environment, namespace, cursor),
+  const sorting = useListSort(EXPIRING_SORTS);
+  const sort = sorting.choice;
+  // A new sort reads the first page again; the rows stay until it arrives.
+  const pages = useCursorPages(
+    `${environment}\u0000${namespace ?? ""}`,
+    (cursor) => listExpiring(environment, namespace, cursor, sort),
+    JSON.stringify(sort),
   );
   // The present is read once per mount, so a render never depends on the clock.
   const [now] = useState(Date.now);
@@ -52,8 +67,13 @@ export function ExpiringView({ environment, namespace }: ExpiringViewProps): JSX
         region={t("catalog.views.expiring.region")}
         head={
           <tr>
-            <th scope="col">{t("catalog.views.expiring.columns.table")}</th>
-            <th scope="col">{t("catalog.views.expiring.columns.when")}</th>
+            <SortHeader {...sorting.header("name")}>
+              {t("catalog.views.expiring.columns.table")}
+            </SortHeader>
+            <SortHeader {...sorting.header("expires")}>
+              {t("catalog.views.expiring.columns.when")}
+            </SortHeader>
+            {/* The why is a sentence made of the rule, with no order that means something. */}
             <th scope="col">{t("catalog.views.expiring.columns.why")}</th>
           </tr>
         }
