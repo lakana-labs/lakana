@@ -1,4 +1,5 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -7,6 +8,7 @@ import { api, DownloadCut, DownloadTooLong } from "../../api/client";
 import { artifactRoutes, version, WEIGHTS } from "../../test/artifacts";
 import { fakeServer } from "../../test/server";
 import { saveBlob } from "../../shell/saveFile";
+import { columnTexts, sortBy, sortState } from "../../test/sorting";
 import { VersionFiles } from "./VersionFiles";
 
 vi.mock("../../shell/saveFile", async (original) => ({
@@ -49,7 +51,11 @@ afterEach(() => {
 function renderFiles() {
   const onGone = vi.fn();
   const user = userEvent.setup();
-  render(<VersionFiles place={PLACE} version={3} id="files-3" onGone={onGone} />);
+  render(
+    <MemoryRouter>
+      <VersionFiles place={PLACE} version={3} id="files-3" onGone={onGone} />
+    </MemoryRouter>,
+  );
   return { onGone, user };
 }
 
@@ -90,6 +96,20 @@ describe("VersionFiles", () => {
     expect(document.getElementById("files-3")).toContainElement(weights);
   });
 
+  it("sorts the files by path and by size", async () => {
+    fakeServer(artifactRoutes());
+    const { user } = renderFiles();
+    await rows();
+    const region = screen.getByRole("region", { name: "Files of version 3" });
+
+    await sortBy(user, region, "Path");
+    await sortBy(user, region, "Path");
+    expect(sortState(region, "Path")).toBe("descending");
+    expect(columnTexts(region)).toEqual(["models/model.pkl", "config.json"]);
+    await sortBy(user, region, "Size");
+    expect(columnTexts(region, 1)).toEqual(["7 B", "6 B"]);
+  });
+
   it("shows the whole-version command, quoted", async () => {
     fakeServer(artifactRoutes());
     renderFiles();
@@ -109,7 +129,11 @@ describe("VersionFiles", () => {
         body: version({ files: [WEIGHTS] }),
       },
     });
-    render(<VersionFiles place={place} version={3} id="files-3" onGone={vi.fn()} />);
+    render(
+      <MemoryRouter>
+        <VersionFiles place={place} version={3} id="files-3" onGone={vi.fn()} />
+      </MemoryRouter>,
+    );
 
     expect(
       await screen.findByText(

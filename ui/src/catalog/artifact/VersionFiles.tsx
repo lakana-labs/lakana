@@ -27,6 +27,9 @@ import { formatBytes } from "../format";
 import { ListSkeleton } from "../ListSkeleton";
 import "./artifactStrings";
 import { fileName, saveBlob } from "../../shell/saveFile";
+import { type ListSortSpec, sortRows } from "../../shell/listSort";
+import { SortHeader } from "../../shell/SortHeader";
+import { useListSort } from "../../shell/useListSort";
 import { ShowMore, useShowMore } from "./ShowMore";
 
 /** Properties of {@link VersionFiles}. */
@@ -62,6 +65,13 @@ function wholeVersionCommand(place: TableRef, version: number): string {
   ].join(" ");
 }
 
+/** The columns a version's files sort by, in the browser: they are read whole. */
+const FILE_SORT: ListSortSpec<"path" | "size"> = {
+  fields: { path: "asc", size: "desc" },
+  natural: null,
+  param: "files",
+};
+
 /**
  * Reads the version's files and lists them, 100 at a time. A file up to
  * {@link BROWSER_DOWNLOAD_LIMIT} has Download, which reads it, checks its size and SHA-256
@@ -84,7 +94,12 @@ export function VersionFiles({ place, version, id, onGone }: VersionFilesProps):
     [environment, namespace, name, version],
   );
   const resource = useResource(load);
-  const files = resource.data?.files ?? [];
+  const sorting = useListSort(FILE_SORT);
+  // Sorted whole, before Show more cuts it.
+  const files = sortRows(resource.data?.files ?? [], sorting.sort, {
+    path: (file) => file.path,
+    size: (file) => file.size,
+  });
   const region = useRef<HTMLDivElement>(null);
   const rows = useShowMore(files.length, region, ".file-path");
   const [working, setWorking] = useState<ReadonlySet<string>>(new Set());
@@ -146,10 +161,12 @@ export function VersionFiles({ place, version, id, onGone }: VersionFilesProps):
         <table className="list list-static">
           <thead>
             <tr>
-              <th scope="col">{t("table.artifact.files.columns.path")}</th>
-              <th scope="col" className="number">
+              <SortHeader {...sorting.header("path")}>
+                {t("table.artifact.files.columns.path")}
+              </SortHeader>
+              <SortHeader {...sorting.header("size")} className="number">
                 {t("table.artifact.files.columns.size")}
-              </th>
+              </SortHeader>
               <th scope="col">
                 <span className="visually-hidden">
                   {t("table.artifact.files.columns.download")}
