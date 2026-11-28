@@ -6,7 +6,7 @@ import pydantic
 import pytest
 from pydantic import SecretStr
 
-from lakana_core.oidc.config import OidcSignInConfig, checked_issuer
+from lakana_core.oidc.config import OidcSignInConfig, checked_issuer, without_empty_values
 
 ISSUER = "https://idp.example.com/realms/lakana"
 
@@ -104,7 +104,7 @@ def test_shown_name_defaults_to_the_issuer_host() -> None:
     assert OidcSignInConfig().shown_name == ""
 
 
-@pytest.mark.parametrize("name", ["", "  ", "x" * 81, "a\nb"])
+@pytest.mark.parametrize("name", ["x" * 81, "a\nb", " a\x7fb "])
 def test_display_name_is_one_short_line(name: str) -> None:
     with pytest.raises(pydantic.ValidationError, match="LAKANA_OIDC__DISPLAY_NAME"):
         config(display_name=name)
@@ -151,3 +151,68 @@ def test_a_json_list_must_hold_texts() -> None:
         config(scopes="[1, 2]")
     with pytest.raises(pydantic.ValidationError, match="LAKANA_OIDC__SCOPES"):
         config(scopes="[openid")
+
+
+FIELDS = (
+    "issuer",
+    "client_id",
+    "client_secret",
+    "scopes",
+    "display_name",
+    "allow_hosts",
+    "proxy",
+    "ca_bundle",
+)
+"""Every `LAKANA_OIDC__*` setting."""
+
+
+@pytest.mark.parametrize("blank", ["", "  ", "\t\n"])
+def test_an_empty_setting_counts_as_not_set(blank: str) -> None:
+    """Compose passes an empty value for a `${VAR}` that `.env` leaves empty (#853)."""
+    off = OidcSignInConfig.model_validate(dict.fromkeys(FIELDS, blank))
+    assert off == OidcSignInConfig()
+    assert not off.enabled
+    on = config(
+        **dict.fromkeys(("scopes", "display_name", "allow_hosts", "proxy", "ca_bundle"), blank)
+    )
+    assert (on.scopes, on.display_name, on.allow_hosts, on.proxy, on.ca_bundle) == (
+        ["openid", "profile", "email"],
+        None,
+        [],
+        None,
+        None,
+    )
+    assert config(proxy=SecretStr(blank)).proxy is None
+
+
+@pytest.mark.parametrize("missing", ["client_id", "client_secret"])
+def test_an_issuer_with_an_empty_client_setting_is_still_refused(missing: str) -> None:
+    with pytest.raises(
+        pydantic.ValidationError, match=f"LAKANA_OIDC__{missing.upper()} is required"
+    ):
+        config(**{missing: " "})
+    with pytest.raises(pydantic.ValidationError, match="LAKANA_OIDC__CLIENT_SECRET is required"):
+        config(client_secret=SecretStr(" "))
+
+
+def test_only_a_mapping_loses_its_empty_values() -> None:
+    """A configuration object (or anything else) goes to pydantic unchanged."""
+    built = config()
+    assert without_empty_values(built) is built
+    assert OidcSignInConfig.model_validate(built) == built
+
+
+@pytest.mark.parametrize("given", ["client_id", "client_secret"])
+@pytest.mark.parametrize("issuer", [None, "", "  "])
+def test_a_client_setting_without_an_issuer_is_refused(given: str, issuer: str | None) -> None:
+    """A lost issuer line must not quietly turn single sign-on off (#853)."""
+    fields = {"issuer": issuer, given: "lakana" if given == "client_id" else "s3cr3t-sentinel"}
+    with pytest.raises(pydantic.ValidationError) as info:
+        OidcSignInConfig.model_validate(fields)
+    message = str(info.value)
+    assert f"LAKANA_OIDC__{given.upper()} is set without LAKANA_OIDC__ISSUER" in message
+    assert (
+        "leave LAKANA_OIDC__ISSUER, LAKANA_OIDC__CLIENT_ID and LAKANA_OIDC__CLIENT_SECRET"
+        in message
+    )
+    assert "s3cr3t-sentinel" not in message

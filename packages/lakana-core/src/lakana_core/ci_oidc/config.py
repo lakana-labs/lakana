@@ -15,7 +15,12 @@ from pydantic import ConfigDict, Field, SecretStr, field_validator, model_valida
 from pydantic_settings import NoDecode
 
 from lakana_core.config import ProxyAndCaBundleChecks
-from lakana_core.oidc.config import as_list, checked_host_names, checked_issuer
+from lakana_core.oidc.config import (
+    as_list,
+    checked_host_names,
+    checked_issuer,
+    without_empty_values,
+)
 from lakana_core.oidc.id_token import SUPPORTED_ALGORITHMS
 
 GITHUB_ISSUER = "https://token.actions.githubusercontent.com"
@@ -112,7 +117,7 @@ class CiOidcConfig(ProxyAndCaBundleChecks):
         The CI providers whose ID tokens the server accepts, as a comma-separated list or a JSON
         list: `github` (GitHub Actions), `gitlab` (GitLab.com) or the https URL of a self-hosted
         GitLab, exactly as its tokens name it (no trailing slash). Empty (the default) turns CI
-        OIDC off.
+        OIDC off. An empty value of any `LAKANA_CI_OIDC__` setting counts as not set.
     audience
         The audience the CI ID tokens must be issued for, usually this server's public URL, for
         example `https://lakana.example`; request the token for the same value in CI.
@@ -155,6 +160,23 @@ class CiOidcConfig(ProxyAndCaBundleChecks):
     proxy: SecretStr | None = None
     ca_bundle: Path | None = None
     token_ttl_seconds: int = Field(default=3600, ge=60, le=21600)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _empty_is_not_set(cls, data: object) -> object:
+        """Treat an empty setting as a missing one.
+
+        Parameters
+        ----------
+        data
+            The raw settings.
+
+        Returns
+        -------
+        object
+            See `lakana_core.oidc.config.without_empty_values`.
+        """
+        return without_empty_values(data)
 
     @property
     def enabled(self) -> bool:
