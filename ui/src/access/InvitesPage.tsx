@@ -32,6 +32,8 @@ import { PendingButton } from "../shell/PendingButton";
 import { markedText, VisibleText } from "../shell/VisibleText";
 import { SettingsFrame } from "../settings/SettingsFrame";
 import "../settings/settingsStrings";
+import { type ListSortSpec, sortRows } from "../shell/listSort";
+import { useListSort } from "../shell/useListSort";
 import "../settings/signInStrings";
 
 /** Properties of {@link InviteDialog}. */
@@ -110,6 +112,13 @@ function InviteDialog({ onClose }: InviteDialogProps): JSX.Element {
   );
 }
 
+/** The columns the open invites sort by, in the browser: the list is read whole. */
+const INVITE_SORT: ListSortSpec<"name" | "expires"> = {
+  fields: { name: "asc", expires: "asc" },
+  natural: null,
+  param: "invites",
+};
+
 /**
  * Renders the open invites in their own scrolling region, each withdrawn in place (an invite
  * has no page of its own, so its name is plain text, kept whole), and the one action: invite
@@ -120,6 +129,7 @@ function InviteDialog({ onClose }: InviteDialogProps): JSX.Element {
 export function InvitesPage(): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
+  const sorting = useListSort(INVITE_SORT);
   const invites = useResource(listInvites);
   const withdraw = useAttempt();
   const [pressed, setPressed] = useState<string | null>(null);
@@ -165,9 +175,13 @@ export function InvitesPage(): JSX.Element {
                 <ListHead
                   columns={[t("list.name"), t("list.expires")]}
                   hidden={[t("list.actions")]}
+                  sorts={{ by: ["name", "expires"], sorting }}
                 />
                 <tbody>
-                  {open.map((invite) => (
+                  {sortRows(open, sorting.sort, {
+                    name: (invite) => invite.name,
+                    expires: (invite) => invite.expires_at,
+                  }).map((invite) => (
                     <tr key={invite.id}>
                       <td>
                         <span className="row-name">

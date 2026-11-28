@@ -26,8 +26,8 @@ import { useRunPages } from "./useRunPages";
 
 /** The states the list can be narrowed to; `all` is no narrowing. */
 /** The columns a job's runs sort by: the newest first unless the address says otherwise. */
-const JOB_RUN_SORTS: ListSortSpec<"status" | "created"> = {
-  fields: { status: "asc", created: "desc" },
+const JOB_RUN_SORTS: ListSortSpec<"status" | "created" | "duration" | "trigger" | "tasks"> = {
+  fields: { status: "asc", created: "desc", duration: "desc", trigger: "asc", tasks: "desc" },
   natural: { field: "created", order: "desc" },
 };
 
@@ -175,11 +175,11 @@ export function JobRuns({
           <tr>
             <SortHeader {...sorting.header("status")}>{t("jobs.runs.columns.state")}</SortHeader>
             <SortHeader {...sorting.header("created")}>{t("jobs.runs.columns.created")}</SortHeader>
-            <th scope="col" className="number">
+            <SortHeader {...sorting.header("duration")} className="number">
               {t("jobs.runs.columns.duration")}
-            </th>
-            <th scope="col">{t("jobs.runs.columns.trigger")}</th>
-            <th scope="col">{t("jobs.runs.columns.tasks")}</th>
+            </SortHeader>
+            <SortHeader {...sorting.header("trigger")}>{t("jobs.runs.columns.trigger")}</SortHeader>
+            <SortHeader {...sorting.header("tasks")}>{t("jobs.runs.columns.tasks")}</SortHeader>
             <th scope="col">
               <span className="visually-hidden">{t("list.open")}</span>
             </th>

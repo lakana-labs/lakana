@@ -10,6 +10,7 @@ import type { PrincipalOut } from "./access";
 import { api } from "./client";
 import { guarded } from "./stepUpFirst";
 import type { CursorPage } from "./manage";
+import { type ListSortChoice, setSort } from "./sorting";
 
 /** A group, as `GET /api/v1/groups` lists it. */
 export interface GroupOut {
@@ -44,12 +45,14 @@ function groupApiPath(name: string, suffix = ""): string {
  *
  * @param query - The words and the member.
  * @param cursor - The cursor of the page; null for the first.
+ * @param sort - The sort; null for the newest first.
  * @returns The page and the cursor of the next one.
  * @throws {ApiError} for a refusal, such as 404 for an unknown member.
  */
 export async function listGroups(
   query: GroupQuery,
   cursor: string | null,
+  sort: ListSortChoice | null = null,
 ): Promise<CursorPage<GroupOut>> {
   const params = new URLSearchParams();
   if (query.words.trim() !== "") {
@@ -59,6 +62,7 @@ export async function listGroups(
     params.set("member", query.member);
   }
   params.set("limit", String(GROUPS_PAGE));
+  setSort(params, sort);
   if (cursor !== null) {
     params.set("cursor", cursor);
   }

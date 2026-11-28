@@ -229,7 +229,10 @@ for (const theme of ["light", "dark"] as const) {
 
       await page.goto(`${ORIGIN}/settings/environments/prod`);
       await expect(page.getByText("S3 · s3://corp-lake/prod")).toBeVisible();
-      await expect(page.getByRole("main").getByRole("button")).toHaveCount(0);
+      // Nothing to act with: the headers that sort are the only buttons.
+      await expect(
+        page.getByRole("main").getByRole("button").and(page.locator(":not(.sort-head)")),
+      ).toHaveCount(0);
       expect(writes).toEqual(["/api/v1/environments/dev/retention"]);
       expectOnlyStubbed(paths);
       expect(errors).toEqual([]);

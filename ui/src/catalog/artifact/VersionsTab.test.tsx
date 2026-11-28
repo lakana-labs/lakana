@@ -11,6 +11,7 @@ import {
 } from "../../test/artifacts";
 import { manageRoutes } from "../../test/manage";
 import { held } from "../../test/pending";
+import { sortBy, sortState } from "../../test/sorting";
 import { renderShell } from "../../test/render";
 
 /**
@@ -122,6 +123,24 @@ describe("VersionsTab", () => {
     expect(within(three).getByText("3").closest("td")).not.toHaveClass("number");
     expect(three.querySelectorAll("td.number")).toHaveLength(2);
     expect(one).toBeDefined();
+  });
+
+  it("sorts the versions by each column, the newest first without one", async () => {
+    const { user } = renderShell(TAB, { routes: artifactRoutes() });
+    const listed = await rows();
+    const region = listed[0]?.closest("[role=region]") as HTMLElement;
+    expect(sortState(region, "Version")).toBe("descending");
+    const versions = (): string[] =>
+      [...region.querySelectorAll(".version-number")].map((cell) => cell.textContent);
+
+    await sortBy(user, region, "Version");
+    expect(sortState(region, "Version")).toBe("ascending");
+    expect(versions()).toEqual(["1", "2", "3"]);
+    await sortBy(user, region, "Stored");
+    expect(sortState(region, "Stored")).toBe("descending");
+    await sortBy(user, region, "Size");
+    await sortBy(user, region, "Files");
+    expect(sortState(region, "Files")).toBe("descending");
   });
 
   it("leaves out who stored a version and its commit when they are not known", async () => {

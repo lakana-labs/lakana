@@ -63,7 +63,12 @@ from lakana_core.projects.definition import (
 )
 from lakana_server.api.platform.catalog import _no_nul
 from lakana_server.api.platform.languages import LANG_DESCRIPTION, reader_languages
-from lakana_server.api.platform.listing import TableCursorParam, set_next_cursor
+from lakana_server.api.platform.listing import (
+    OrderParam,
+    SortParam,
+    TableCursorParam,
+    set_next_cursor,
+)
 from lakana_server.api.platform.schemas import (
     AppendOut,
     ColumnOut,
@@ -2426,15 +2431,18 @@ def list_expiring_tables(
     namespace: str | None = Query(default=None, max_length=255),
     limit: int = Query(default=100, ge=1, le=200),
     cursor: TableCursorParam = None,
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
 ) -> list[TableRetentionOut]:
     """List the tables about to expire.
 
-    Lists the managed tables of the environment that expire within `within_days`, soonest
-    first. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422
-    when `within_days` is out of range or the cursor is not one this list issued. The cursor of
-    the next page is in the `X-Next-Cursor` response header and is absent on the last page.
+    Lists the managed tables of the environment that expire within `within_days`, soonest first,
+    or in the order `sort` and `order` ask for. Needs `READ_ENVIRONMENT`. Answers 404 when the
+    environment does not exist and 422 when `within_days` is out of range, `sort` or `order` is
+    unknown, or the cursor is not one this list issued in this order. The cursor of the next
+    page is in the `X-Next-Cursor` response header and is absent on the last page.
 
     Parameters
     ----------
@@ -2453,6 +2461,11 @@ def list_expiring_tables(
         Most tables returned (1 to 200).
     cursor
         The `X-Next-Cursor` of the previous page; send the same `within_days` and `namespace`.
+    sort
+        What the list is sorted by: `expires` (the default) or `name` (the table's name,
+        then its namespace).
+    order
+        `asc` or `desc`; `asc` by default.
     principal
         The authenticated caller; needs `READ_ENVIRONMENT`, and sees the tables it may read.
     catalog
@@ -2480,6 +2493,8 @@ def list_expiring_tables(
         namespace=NamespacePath.from_parts(namespace.split(".")) if namespace else None,
         limit=limit,
         cursor=cursor,
+        sort=sort,
+        order=order,
     )
     set_next_cursor(response, page.next_cursor)
     return [_retention_out(entry) for entry in page.items]
@@ -2489,16 +2504,19 @@ def list_expiring_tables(
 def list_environment_dropped_tables(
     env: str,
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: TableCursorParam = None,
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
 ) -> DroppedTablePageOut:
     """List the dropped tables of an environment.
 
     Lists the tables dropped from any namespace of the environment whose files are not deleted
-    yet, newest drop first. Needs `READ_ENVIRONMENT`; a table the caller may not read is left
-    out. Answers 404 when the environment does not exist and 422 when the cursor is not one
-    this list issued.
+    yet, newest drop first or in the order `sort` and `order` ask for. Needs `READ_ENVIRONMENT`;
+    a table the caller may not read is left out. Answers 404 when the environment does not exist
+    and 422 when `sort` or `order` is unknown or the cursor is not one this list issued in this
+    order.
 
     Parameters
     ----------
@@ -2508,6 +2526,11 @@ def list_environment_dropped_tables(
         Most tables returned (1 to 200).
     cursor
         The `next_cursor` of the previous page.
+    sort
+        What the list is sorted by: `dropped` (the default), `name` (the table's name, then
+        its namespace) or `purge` (when its files are deleted).
+    order
+        `asc` or `desc`; by default `desc` for `dropped`, `asc` for the others.
     principal
         The authenticated caller.
     catalog
@@ -2525,7 +2548,9 @@ def list_environment_dropped_tables(
     lakana_core.errors.ValidationError
         Mapped to 422 for a cursor this list did not issue.
     """
-    page = catalog.list_environment_dropped_tables(principal, env, limit=limit, cursor=cursor)
+    page = catalog.list_environment_dropped_tables(
+        principal, env, limit=limit, cursor=cursor, sort=sort, order=order
+    )
     return DroppedTablePageOut(
         items=[
             DroppedTableOut(
@@ -2548,14 +2573,17 @@ def list_environment_dropped_tables(
 def list_dropped_tables(
     env: str,
     path: str,
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
 ) -> list[DroppedTableOut]:
     """List the dropped tables of a namespace.
 
     Lists the tables dropped from the namespace whose files are not deleted yet and that can
-    therefore still be restored. Needs `READ_TABLE` on the namespace. Answers 404 when the
-    namespace does not exist.
+    therefore still be restored, newest drop first or in the order `sort` and `order` ask for.
+    Needs `READ_TABLE` on the namespace. Answers 404 when the namespace does not exist and 422
+    for an unknown `sort` or `order`.
 
     Parameters
     ----------
@@ -2563,6 +2591,10 @@ def list_dropped_tables(
         Environment name.
     path
         Dot-joined namespace path.
+    sort
+        What the list is sorted by: `dropped` (the default), `name` or `purge`.
+    order
+        `asc` or `desc`; by default `desc` for `dropped`, `asc` for the others.
     principal
         The authenticated caller; needs `READ_TABLE` on the namespace.
     catalog
@@ -2590,7 +2622,7 @@ def list_dropped_tables(
             restorable=dropped.restorable,
             actions=list(dropped.actions),
         )
-        for dropped in catalog.list_dropped_tables(principal, env, ns)
+        for dropped in catalog.list_dropped_tables(principal, env, ns, sort=sort, order=order)
     ]
 
 

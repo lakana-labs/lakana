@@ -21,7 +21,10 @@ import { grantsPath, policiesPath } from "../../access/accessPaths";
 import { SubjectName } from "../../access/SubjectName";
 import type { CursorPage } from "../../api/manage";
 import { listColumnMaskPage, listRowFilterPage, type PolicyFilter } from "../../api/policies";
+import type { ListSortSpec } from "../../shell/listSort";
 import { useMe } from "../../shell/me";
+import { SortHeader } from "../../shell/SortHeader";
+import { useListSort } from "../../shell/useListSort";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import { type Resource, useResource } from "../../shell/useResource";
 import { VisibleText } from "../../shell/VisibleText";
@@ -74,6 +77,7 @@ function Answers({ permissions }: { readonly permissions: readonly PermissionOut
   return (
     <table className="list list-static">
       <thead>
+        {/* Read, Write, Drop and Edit texts, in that order: a fixed set, not a list to sort. */}
         <tr>
           <th scope="col">{t("table.access.mine.action")}</th>
           <th scope="col">{t("table.access.mine.answer")}</th>
@@ -187,6 +191,27 @@ function Mine(): JSX.Element {
   );
 }
 
+/** The columns every level's grants sort by, on the server, one sort for all the levels. */
+const ACCESS_GRANT_SORTS: ListSortSpec<"who" | "what" | "granted"> = {
+  fields: { who: "asc", what: "asc", granted: "desc" },
+  natural: { field: "granted", order: "desc" },
+  param: "grants",
+};
+
+/** The row filters sort by whom on the server; their own order, the newest first, is no column. */
+const ACCESS_FILTER_SORTS: ListSortSpec<"who"> = {
+  fields: { who: "asc" },
+  natural: null,
+  param: "filters",
+};
+
+/** The column masks sort by whom and by column on the server. */
+const ACCESS_MASK_SORTS: ListSortSpec<"who" | "column"> = {
+  fields: { who: "asc", column: "asc" },
+  natural: null,
+  param: "masks",
+};
+
 /** The command that lists every grant on the whole instance. */
 const INSTANCE_GRANTS_COMMAND = "lakana grant list --kind INSTANCE";
 
@@ -213,9 +238,12 @@ function GrantsAt({ level, heading }: GrantsAtProps): JSX.Element {
   const environment = instance ? "" : level.environment;
   const namespace = instance ? null : level.namespace;
   const table = instance ? null : level.table;
+  const sorting = useListSort(ACCESS_GRANT_SORTS);
+  const sort = sorting.choice;
   const load = useCallback(
-    () => (instance ? listInstanceGrants() : listGrantsAt({ environment, namespace, table })),
-    [instance, environment, namespace, table],
+    () =>
+      instance ? listInstanceGrants(sort) : listGrantsAt({ environment, namespace, table }, sort),
+    [instance, environment, namespace, table, sort],
   );
   const resource = useResource(load);
   return (
@@ -233,9 +261,13 @@ function GrantsAt({ level, heading }: GrantsAtProps): JSX.Element {
             <table className="list list-static">
               <thead>
                 <tr>
-                  <th scope="col">{t("table.access.who.subject")}</th>
-                  <th scope="col">{t("table.access.who.grant")}</th>
-                  <th scope="col">{t("table.access.who.since")}</th>
+                  <SortHeader {...sorting.header("who")}>
+                    {t("table.access.who.subject")}
+                  </SortHeader>
+                  <SortHeader {...sorting.header("what")}>{t("table.access.who.grant")}</SortHeader>
+                  <SortHeader {...sorting.header("granted")}>
+                    {t("table.access.who.since")}
+                  </SortHeader>
                 </tr>
               </thead>
               <tbody>
@@ -410,9 +442,11 @@ function RowFilters(): JSX.Element {
   const { t } = useTranslation();
   const { ref } = useTableData();
   const { environment, namespace, name } = ref;
+  const sorting = useListSort(ACCESS_FILTER_SORTS);
+  const sort = sorting.choice;
   const load = useCallback(
-    () => listRowFilterPage(tableFilter(environment, namespace, name), null, MOST_POLICIES),
-    [environment, namespace, name],
+    () => listRowFilterPage(tableFilter(environment, namespace, name), null, MOST_POLICIES, sort),
+    [environment, namespace, name, sort],
   );
   const resource = useResource<CursorPage<RowFilterOut>>(load);
   return (
@@ -430,7 +464,8 @@ function RowFilters(): JSX.Element {
             more={nextCursor !== null}
             head={
               <>
-                <th scope="col">{t("table.access.who.subject")}</th>
+                <SortHeader {...sorting.header("who")}>{t("table.access.who.subject")}</SortHeader>
+                {/* An expression is SQL someone wrote, with no order that means something. */}
                 <th scope="col">{t("table.access.filters.expression")}</th>
               </>
             }
@@ -459,9 +494,11 @@ function ColumnMasks(): JSX.Element {
   const { t } = useTranslation();
   const { ref } = useTableData();
   const { environment, namespace, name } = ref;
+  const sorting = useListSort(ACCESS_MASK_SORTS);
+  const sort = sorting.choice;
   const load = useCallback(
-    () => listColumnMaskPage(tableFilter(environment, namespace, name), null, MOST_POLICIES),
-    [environment, namespace, name],
+    () => listColumnMaskPage(tableFilter(environment, namespace, name), null, MOST_POLICIES, sort),
+    [environment, namespace, name, sort],
   );
   const resource = useResource<CursorPage<ColumnMaskOut>>(load);
   return (
@@ -479,8 +516,10 @@ function ColumnMasks(): JSX.Element {
             more={nextCursor !== null}
             head={
               <>
-                <th scope="col">{t("table.access.who.subject")}</th>
-                <th scope="col">{t("table.access.masks.column")}</th>
+                <SortHeader {...sorting.header("who")}>{t("table.access.who.subject")}</SortHeader>
+                <SortHeader {...sorting.header("column")}>
+                  {t("table.access.masks.column")}
+                </SortHeader>
                 <th scope="col">{t("table.access.masks.expression")}</th>
               </>
             }

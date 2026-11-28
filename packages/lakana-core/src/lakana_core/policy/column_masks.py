@@ -27,7 +27,7 @@ from lakana_core.policy.columns import (
 from lakana_core.policy.expression_types import check_expression_types
 from lakana_core.policy.expressions import columns_of
 from lakana_core.policy.field_binding import PolicyBinding
-from lakana_core.policy.shown import PolicyShowing
+from lakana_core.policy.shown import COLUMN_MASK_SORTS, PolicyShowing
 
 
 def _check_column_exists(
@@ -121,6 +121,7 @@ class ColumnMaskService(PolicyShowing[ColumnMask]):
 
     _model = ColumnMask
     _list_kind = "column-masks"
+    _sorts = COLUMN_MASK_SORTS
 
     def __init__(
         self, session: Session, authz: AuthorizationService, catalog: ColumnSource

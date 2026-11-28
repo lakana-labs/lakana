@@ -6,6 +6,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -273,36 +274,58 @@ def test_deploys_filter_by_repository_and_page(client: TestClient) -> None:
 
 
 _SORTABLE = {
-    _RUNS: "created, name, status",
-    "/api/v1/runs": "created, name, status",
-    _DEPLOYS: "created, status",
-    "/api/v1/deploys": "created, status",
-    "/api/v1/environments/dev/jobs": "last_run, name, next_run, status",
-    "/api/v1/environments/dev/connections": "created, name, status",
-    "/api/v1/connections": "created, name, status",
+    _RUNS: "created, duration, environment, name, status, tasks, trigger",
+    "/api/v1/runs": "created, duration, environment, name, status, tasks, trigger",
+    _DEPLOYS: "created, kind, repository, status, who",
+    "/api/v1/deploys": "created, kind, repository, status, who",
+    "/api/v1/environments/dev/jobs": ("environment, last_run, name, next_run, repository, status"),
+    "/api/v1/environments/dev/connections": "created, environment, kind, name, status",
+    "/api/v1/connections": "created, environment, kind, name, status",
     "/api/v1/environments/dev/saved-queries": "created, name, updated",
     "/api/v1/saved-queries": "created, name, updated",
     "/api/v1/principals": "created, name, status",
-    "/api/v1/audit-events": "occurred",
+    "/api/v1/audit-events": "event, occurred, on, who",
+    "/api/v1/grants": "granted, on, what, who",
+    "/api/v1/groups": "created, name",
+    "/api/v1/row-filters": "created, on, who",
+    "/api/v1/column-masks": "column, created, on, who",
+    "/api/v1/tokens": "created, expires, last_used, name, owner",
+    "/api/v1/task-tokens": "acts_as, environment, expires, issued, purpose",
+    "/api/v1/environments/dev/dropped-tables": "dropped, name, purge",
+    "/api/v1/environments/dev/expiring-tables": "expires, name",
+    "/api/v1/environments/dev/orphans": "kind, name, repository",
+    "/api/v1/environments/dev/queries": "created, status",
+    "/api/v1/queries": "created, status",
 }
 """Every list a person can sort by a column, with the fields it sorts by."""
 
 
-def test_every_sortable_list_takes_its_fields_and_refuses_any_other(client: TestClient) -> None:
+@pytest.mark.parametrize(("url", "fields"), list(_SORTABLE.items()), ids=list(_SORTABLE))
+def test_every_sortable_list_takes_its_fields_and_refuses_any_other(
+    client: TestClient, url: str, fields: str
+) -> None:
+    """One list a test, so each stays fast: every field both ways, any other field refused.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    url
+        The list's route.
+    fields
+        The fields it sorts by, as its refusal names them.
+    """
     _deploy(client)
-    for url, fields in _SORTABLE.items():
-        for field in fields.split(", "):
-            for order in ("asc", "desc"):
-                ok = client.get(url, headers=AUTH_HEADER, params={"sort": field, "order": order})
-                assert ok.status_code == 200, (url, field, ok.text)
-        unknown = client.get(url, headers=AUTH_HEADER, params={"sort": "secret_text"})
-        assert unknown.status_code == 422, url
-        assert unknown.json()["detail"] == (
-            f"`sort` must be one of: {fields}; got 'secret_text'."
-        ), url
-        direction = client.get(url, headers=AUTH_HEADER, params={"order": "sideways"})
-        assert direction.status_code == 422, url
-        assert direction.json()["detail"] == "`order` must be asc or desc; got 'sideways'.", url
+    for field in fields.split(", "):
+        for order in ("asc", "desc"):
+            ok = client.get(url, headers=AUTH_HEADER, params={"sort": field, "order": order})
+            assert ok.status_code == 200, (url, field, ok.text)
+    unknown = client.get(url, headers=AUTH_HEADER, params={"sort": "secret_text"})
+    assert unknown.status_code == 422, url
+    assert unknown.json()["detail"] == (f"`sort` must be one of: {fields}; got 'secret_text'."), url
+    direction = client.get(url, headers=AUTH_HEADER, params={"order": "sideways"})
+    assert direction.status_code == 422, url
+    assert direction.json()["detail"] == "`order` must be asc or desc; got 'sideways'.", url
 
 
 def test_runs_sorted_by_a_column_page_with_the_header_cursor(client: TestClient) -> None:

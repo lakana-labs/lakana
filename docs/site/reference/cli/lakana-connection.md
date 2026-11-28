@@ -61,7 +61,7 @@ With --all-environments, the connections of every environment you may read, newe
 |---|---|---|---|
 | `--env` | text | none | Environment (default: the profile's). |
 | `--all-environments` | flag | off | The connections of every environment you may read, with an environment column. |
-| `--sort` | text | none | What to sort by: created (the default, newest first), name or status (the last test: failed first, then queued or running, then passed, never tested last). |
+| `--sort` | text | none | What to sort by: created (the default, newest first), name, status (the last test: failed first, then queued or running, then passed, never tested last), kind or environment. |
 | `--order` | text | none | asc or desc; without it, the direction each --sort field has by default. |
 
 ## `lakana connection show`

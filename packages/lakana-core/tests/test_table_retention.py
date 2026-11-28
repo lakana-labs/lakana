@@ -1178,3 +1178,46 @@ def test_the_expiring_list_pages_rows_with_equal_expiry_without_skip_or_repeat(
             if cursor is None:
                 break
     assert len(seen) == 4 and len(set(seen)) == 4
+
+
+def test_the_expiring_list_sorts_by_name_one_a_page(
+    session: Session, principal: PrincipalRef, catalog: CatalogService
+) -> None:
+    """By the table's name, then its namespace; the latest expiry first when asked."""
+    _expiring_catalog(session, principal, catalog)
+
+    def walk(sort: str | None = None, order: str | None = None) -> list[str]:
+        """Read every expiring table one a page.
+
+        Parameters
+        ----------
+        sort
+            The field.
+        order
+            The direction.
+
+        Returns
+        -------
+        list of str
+            The dotted names in the order the pages gave them.
+        """
+        seen: list[str] = []
+        cursor: str | None = None
+        while True:
+            page = catalog.list_expiring_tables(
+                principal, "dev", within_days=7, limit=1, cursor=cursor, sort=sort, order=order
+            )
+            seen += [entry.ref.dotted() for entry in page.items]
+            if page.next_cursor is None:
+                return seen
+            cursor = page.next_cursor
+
+    assert walk(sort="name") == ["gold.orders", "silver.a.t1", "silver.a.x.t2", "silver.ab.t3"]
+    assert walk(sort="expires", order="desc") == [
+        "gold.orders",
+        "silver.a.x.t2",
+        "silver.a.t1",
+        "silver.ab.t3",
+    ]
+    with pytest.raises(ValidationError, match="`sort` must be one of: expires, name; got"):
+        catalog.list_expiring_tables(principal, "dev", within_days=7, sort="why")

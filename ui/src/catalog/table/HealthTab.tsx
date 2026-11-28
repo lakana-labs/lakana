@@ -25,6 +25,9 @@ import { When } from "../cells";
 import { formatBytes } from "../format";
 import { bandWords, effectWord, firedLines, judged, observedWords } from "./health";
 import { TabBody } from "./TabBody";
+import { type ListSortSpec, sortRows } from "../../shell/listSort";
+import { SortHeader } from "../../shell/SortHeader";
+import { useListSort } from "../../shell/useListSort";
 import { useTableData } from "./TableContext";
 
 type Check = TableHealthOut["checks"][number];
@@ -58,6 +61,43 @@ function wordOr(
   return known.includes(value) ? word(value) : <VisibleText text={value} />;
 }
 
+/** The columns the health checks sort by, in the browser. */
+const CHECK_SORT: ListSortSpec<"name" | "result" | "failing" | "finished"> = {
+  fields: { name: "asc", result: "asc", failing: "desc", finished: "desc" },
+  natural: null,
+  param: "checks",
+};
+
+/** The columns the health signals sort by, in the browser. */
+const SIGNAL_SORT: ListSortSpec<"signal" | "column" | "state" | "effect" | "lastFired"> = {
+  fields: { signal: "asc", column: "asc", state: "asc", effect: "asc", lastFired: "desc" },
+  natural: null,
+  param: "signals",
+};
+
+/** The columns the table's readers sort by, in the browser. */
+const READER_SORT: ListSortSpec<"person" | "reads" | "lastRead"> = {
+  fields: { person: "asc", reads: "desc", lastRead: "desc" },
+  natural: null,
+  param: "readers",
+};
+
+/**
+ * The word a list sorts a server value by: the interface's word, else the value itself.
+ *
+ * @param known - The values the interface has words for.
+ * @param value - The server's value.
+ * @param word - The word of a known value.
+ * @returns The text.
+ */
+function wordText(
+  known: readonly string[],
+  value: string,
+  word: (value: string) => string,
+): string {
+  return known.includes(value) ? word(value) : value;
+}
+
 /** Properties of the tab's sections. */
 interface HealthProps {
   /** The health the server answered. */
@@ -75,6 +115,7 @@ interface HealthProps {
 function Checks({ health }: HealthProps): JSX.Element {
   const { t, i18n } = useTranslation();
   const { ref } = useTableData();
+  const sorting = useListSort(CHECK_SORT);
   const row = (check: Check): JSX.Element => {
     const glyph = OUTCOME_GLYPHS[check.outcome];
     return (
@@ -123,15 +164,31 @@ function Checks({ health }: HealthProps): JSX.Element {
           <table className="list list-static health-list">
             <thead>
               <tr>
-                <th scope="col">{t("table.healthTab.checks.name")}</th>
-                <th scope="col">{t("table.healthTab.checks.result")}</th>
-                <th scope="col" className="number">
+                <SortHeader {...sorting.header("name")}>
+                  {t("table.healthTab.checks.name")}
+                </SortHeader>
+                <SortHeader {...sorting.header("result")}>
+                  {t("table.healthTab.checks.result")}
+                </SortHeader>
+                <SortHeader {...sorting.header("failing")} className="number">
                   {t("table.healthTab.checks.failingRows")}
-                </th>
-                <th scope="col">{t("table.healthTab.checks.finished")}</th>
+                </SortHeader>
+                <SortHeader {...sorting.header("finished")}>
+                  {t("table.healthTab.checks.finished")}
+                </SortHeader>
               </tr>
             </thead>
-            <tbody>{health.checks.map(row)}</tbody>
+            <tbody>
+              {sortRows(health.checks, sorting.sort, {
+                name: (check) => check.name,
+                result: (check) =>
+                  wordText(Object.keys(OUTCOME_GLYPHS), check.outcome, (outcome) =>
+                    t(`table.healthTab.checks.outcome.${outcome}`),
+                  ),
+                failing: (check) => check.failing_rows,
+                finished: (check) => check.finished_at,
+              }).map(row)}
+            </tbody>
           </table>
         </div>
       )}
@@ -223,7 +280,10 @@ function SignalRow({ signal }: { readonly signal: Signal }): JSX.Element {
 function Signals({ health }: HealthProps): JSX.Element {
   const { t } = useTranslation();
   const lines = firedLines({ ...health, checks: [] }, t);
-  const columns = ["signal", "column", "state", "observed", "band", "effect", "lastFired"];
+  const sorting = useListSort(SIGNAL_SORT);
+  // What a signal observed and its usual band are measures of different kinds (rows, a share,
+  // a time), with no order across signals: they do not sort.
+  const columns = ["signal", "column", "state", "observed", "band", "effect", "lastFired"] as const;
   return (
     <section className="health-section flat-panel">
       <h2 className="block-heading">{t("table.healthTab.signals.heading")}</h2>
@@ -242,15 +302,34 @@ function Signals({ health }: HealthProps): JSX.Element {
             <table className="list list-static health-list">
               <thead>
                 <tr>
-                  {columns.map((column) => (
-                    <th key={column} scope="col">
-                      {t(`table.healthTab.signals.${column}`)}
-                    </th>
-                  ))}
+                  {columns.map((column) =>
+                    column === "observed" || column === "band" ? (
+                      <th key={column} scope="col">
+                        {t(`table.healthTab.signals.${column}`)}
+                      </th>
+                    ) : (
+                      <SortHeader key={column} {...sorting.header(column)}>
+                        {t(`table.healthTab.signals.${column}`)}
+                      </SortHeader>
+                    ),
+                  )}
                 </tr>
               </thead>
               <tbody>
-                {health.signals.map((signal) => (
+                {sortRows(health.signals, sorting.sort, {
+                  signal: (signal) =>
+                    wordText(SIGNAL_NAMES, signal.signal, (name) =>
+                      t(`table.healthTab.signals.names.${name}`),
+                    ),
+                  // The whole table sorts before its columns.
+                  column: (signal) => signal.column ?? "",
+                  state: (signal) =>
+                    wordText(SIGNAL_STATES, signal.state, (state) =>
+                      t(`table.healthTab.signals.states.${state}`),
+                    ),
+                  effect: (signal) => effectWord(signal.effect, t) ?? signal.effect,
+                  lastFired: (signal) => signal.last_fired_at ?? null,
+                }).map((signal) => (
                   <SignalRow key={signal.id} signal={signal} />
                 ))}
               </tbody>
@@ -332,6 +411,7 @@ function Readers({ health, refused }: HealthProps & { readonly refused: boolean 
   const { table } = useTableData();
   const { hash } = useLocation();
   const heading = useRef<HTMLHeadingElement>(null);
+  const sorting = useListSort(READER_SORT);
   useEffect(() => {
     if (hash === "#readers") {
       heading.current?.focus();
@@ -355,15 +435,23 @@ function Readers({ health, refused }: HealthProps & { readonly refused: boolean 
         <table className="list list-static">
           <thead>
             <tr>
-              <th scope="col">{t("table.healthTab.readers.person")}</th>
-              <th scope="col" className="number">
+              <SortHeader {...sorting.header("person")}>
+                {t("table.healthTab.readers.person")}
+              </SortHeader>
+              <SortHeader {...sorting.header("reads")} className="number">
                 {t("table.healthTab.readers.reads")}
-              </th>
-              <th scope="col">{t("table.healthTab.readers.lastRead")}</th>
+              </SortHeader>
+              <SortHeader {...sorting.header("lastRead")}>
+                {t("table.healthTab.readers.lastRead")}
+              </SortHeader>
             </tr>
           </thead>
           <tbody>
-            {readers.map((reader) => (
+            {sortRows(readers, sorting.sort, {
+              person: (reader) => reader.principal,
+              reads: (reader) => reader.read_count,
+              lastRead: (reader) => reader.last_read_at,
+            }).map((reader) => (
               <tr key={reader.principal}>
                 <td>
                   <Link to={personPath(reader.principal)}>

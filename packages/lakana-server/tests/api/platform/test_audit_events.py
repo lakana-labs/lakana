@@ -1,5 +1,7 @@
 """Tests for the audit-events resource of the platform API."""
 
+import base64
+import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
@@ -13,6 +15,7 @@ from lakana_core.audit.content import fingerprint, install_query_text, stored_qu
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Securable
 from lakana_core.models import AuditEvent, AuditEventType, Principal
+from lakana_core.pagination import encode_sorted_cursor
 from lakana_server.app import create_app
 from lakana_server.settings import ServerAuditConfig, Settings
 from tests.conftest import AUTH_HEADER
@@ -576,3 +579,58 @@ def test_a_filter_by_both_an_id_and_a_name_is_refused(client: TestClient) -> Non
 
     assert response.status_code == 422, response.text
     assert "not both" in response.json()["detail"]
+
+
+def test_list_audit_events_sorted_by_another_field_pages_by_its_own_cursor(
+    client: TestClient,
+) -> None:
+    """A sort by place pages every event once; its cursor carries its keys and its sort."""
+    _create_principals(client, 4)
+    params = {"event_type": "PRINCIPAL_CREATED"}
+    newest = client.get("/api/v1/audit-events", headers=AUTH_HEADER, params=params).json()
+    for sort in ("who", "on", "event"):
+        seen: list[str] = []
+        cursor: str | None = None
+        for _ in range(10):
+            page_params = {**params, "sort": sort, "limit": "1"} | (
+                {"cursor": cursor} if cursor else {}
+            )
+            response = client.get("/api/v1/audit-events", headers=AUTH_HEADER, params=page_params)
+            assert response.status_code == 200, response.text
+            seen.extend(e["id"] for e in response.json()["items"])
+            cursor = response.json()["next_cursor"]
+            if cursor is None:
+                break
+        assert sorted(seen) == sorted(e["id"] for e in newest["items"]), sort
+
+    first = client.get(
+        "/api/v1/audit-events", headers=AUTH_HEADER, params={**params, "sort": "who", "limit": 1}
+    ).json()
+    for other in ({}, {"sort": "on"}):
+        refused = client.get(
+            "/api/v1/audit-events",
+            headers=AUTH_HEADER,
+            params={**params, **other, "cursor": first["next_cursor"]},
+        )
+        assert refused.status_code == 422
+        assert "came from the list sorted by `who:asc`" in refused.json()["detail"]
+
+
+def test_a_sorted_audit_cursor_of_no_sorted_field_is_refused(client: TestClient) -> None:
+    forged = encode_sorted_cursor("audit-events", "occurred:desc", [], uuid.uuid4())
+    refused = client.get("/api/v1/audit-events", headers=AUTH_HEADER, params={"cursor": forged})
+    assert refused.status_code == 422
+    assert refused.json()["detail"].startswith("The cursor is not valid.")
+    no_sort = base64.urlsafe_b64encode(b'{"k": "audit-events", "s": 1}').decode().rstrip("=")
+    refused = client.get("/api/v1/audit-events", headers=AUTH_HEADER, params={"cursor": no_sort})
+    assert refused.status_code == 422
+    odd = encode_sorted_cursor("audit-events", "who:asc", ["bob", "x"], uuid.uuid4())
+    refused = client.get(
+        "/api/v1/audit-events", headers=AUTH_HEADER, params={"cursor": odd, "sort": "who"}
+    )
+    assert refused.status_code == 422
+    timeless = encode_sorted_cursor("audit-events", "who:asc", ["bob", None], uuid.uuid4())
+    refused = client.get(
+        "/api/v1/audit-events", headers=AUTH_HEADER, params={"cursor": timeless, "sort": "who"}
+    )
+    assert refused.status_code == 422

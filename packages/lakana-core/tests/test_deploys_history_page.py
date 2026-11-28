@@ -477,8 +477,11 @@ def test_deploys_refuse_an_unknown_sort_and_a_cursor_of_another_sort(
     for minutes in (1, 2):
         _deploy(session, env, repo.id, minutes)
     service = _service(session)
-    with pytest.raises(ValidationError, match="`sort` must be one of: created, status; got 'name'"):
-        service.history_page(principal, "dev", sort="name")
+    with pytest.raises(
+        ValidationError,
+        match="`sort` must be one of: created, kind, repository, status, who; got 'commit'",
+    ):
+        service.history_page(principal, "dev", sort="commit")
     _, by_state = service.history_page(principal, "dev", limit=1, sort="status")
     assert by_state is not None
     with pytest.raises(ValidationError, match="in its default order"):
@@ -500,3 +503,32 @@ def test_all_deploys_sort_oldest_first(session: Session, admin: PrincipalRef) ->
     assert seen == [r.id for r in runs]
     page, _ = service.list_all_deploys_page(admin, environment="dev", sort="created", order="asc")
     assert [v.id for v in page] == [runs[0].id, runs[3].id, runs[6].id]
+
+
+def test_deploys_sort_by_kind_repository_and_who_newest_first_within_one(
+    session: Session, env: Environment, principal: PrincipalRef
+) -> None:
+    beta = _deploy(session, env, _repo(session, "Beta").id, 1)
+    alpha_old = _deploy(session, env, _repo(session, "alpha").id, 2)
+    alpha_new = _deploy(session, env, alpha_old.repository_id, 3)
+    alpha_old.kind = DeployKind.ROLLBACK
+    beta.kind = DeployKind.DRY_RUN
+    alpha_new.principal_id = principal.id
+    session.commit()
+    service = _service(session)
+    assert _walk_deploys(service, principal, sort="repository") == [
+        alpha_new.id,
+        alpha_old.id,
+        beta.id,
+    ]
+    assert _walk_deploys(service, principal, sort="kind") == [
+        alpha_new.id,
+        beta.id,
+        alpha_old.id,
+    ]
+    assert _walk_deploys(service, principal, sort="who") == [alpha_new.id, alpha_old.id, beta.id]
+    assert _walk_deploys(service, principal, sort="who", order="desc") == [
+        alpha_new.id,
+        alpha_old.id,
+        beta.id,
+    ]

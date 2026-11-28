@@ -1962,7 +1962,7 @@
           "queries"
         ],
         "summary": "List the queries of an environment",
-        "description": "Lists running queries first, then queued ones, then, when asked, ended ones. Needs `SUBMIT_QUERY` on the environment, or `MANAGE_ENVIRONMENT`. A holder of `MANAGE_ENVIRONMENT` sees every query of the environment; everyone else sees the queries they submitted. The list never shows SQL text, error messages or results. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same filters with every page. Answers 404 when the environment does not exist, and 422 for an unknown status or origin or a `since` without a time zone. Answers 503 when a manager's page shows someone else's queries and the audit entry for that could not be written; nothing is listed then.",
+        "description": "Lists running queries first, then queued ones, then, when asked, ended ones. Needs `SUBMIT_QUERY` on the environment, or `MANAGE_ENVIRONMENT`. A holder of `MANAGE_ENVIRONMENT` sees every query of the environment; everyone else sees the queries they submitted. The list never shows SQL text, error messages or results. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same filters with every page. Answers 404 when the environment does not exist, and 422 for an unknown status or origin, a `since` without a time zone, an unknown `sort` or `order`, or a cursor of another order. Answers 503 when a manager's page shows someone else's queries and the audit entry for that could not be written; nothing is listed then.",
         "operationId": "list_queries_api_v1_environments__env__queries_get",
         "parameters": [
           {
@@ -2082,6 +2082,42 @@
               "title": "Cursor"
             },
             "description": "The `X-Next-Cursor` of the previous page."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "`created` (when submitted) or `status`, in one order for every state; without `sort` and `order`, the list's own order."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; by default `desc` for `created`, `asc` for `status`."
           },
           {
             "name": "authorization",
@@ -2805,6 +2841,42 @@
             "description": "The `next_cursor` of the previous page."
           },
           {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by, with the fields of the list of one environment."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`, each field's way by default, as on the list of one environment."
+          },
+          {
             "name": "authorization",
             "in": "header",
             "required": false,
@@ -2993,7 +3065,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 5244
+                  "maxLength": 6144
                 },
                 {
                   "type": "null"
@@ -3608,7 +3680,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 5244
+                  "maxLength": 6144
                 },
                 {
                   "type": "null"
@@ -7514,7 +7586,7 @@
           "tables"
         ],
         "summary": "List the dropped tables of a namespace",
-        "description": "Lists the tables dropped from the namespace whose files are not deleted yet and that can therefore still be restored. Needs `READ_TABLE` on the namespace. Answers 404 when the namespace does not exist.",
+        "description": "Lists the tables dropped from the namespace whose files are not deleted yet and that can therefore still be restored, newest drop first or in the order `sort` and `order` ask for. Needs `READ_TABLE` on the namespace. Answers 404 when the namespace does not exist and 422 for an unknown `sort` or `order`.",
         "operationId": "list_dropped_tables_api_v1_environments__env__namespaces__path__dropped_tables_get",
         "parameters": [
           {
@@ -7536,6 +7608,42 @@
               "title": "Path"
             },
             "description": "Dot-joined namespace path."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `dropped` (the default), `name` or `purge`."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; by default `desc` for `dropped`, `asc` for the others."
           },
           {
             "name": "authorization",
@@ -7620,7 +7728,7 @@
           "tables"
         ],
         "summary": "List the dropped tables of an environment",
-        "description": "Lists the tables dropped from any namespace of the environment whose files are not deleted yet, newest drop first. Needs `READ_ENVIRONMENT`; a table the caller may not read is left out. Answers 404 when the environment does not exist and 422 when the cursor is not one this list issued.",
+        "description": "Lists the tables dropped from any namespace of the environment whose files are not deleted yet, newest drop first or in the order `sort` and `order` ask for. Needs `READ_ENVIRONMENT`; a table the caller may not read is left out. Answers 404 when the environment does not exist and 422 when `sort` or `order` is unknown or the cursor is not one this list issued in this order.",
         "operationId": "list_environment_dropped_tables_api_v1_environments__env__dropped_tables_get",
         "parameters": [
           {
@@ -7654,7 +7762,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 512
+                  "maxLength": 12964
                 },
                 {
                   "type": "null"
@@ -7663,6 +7771,42 @@
               "title": "Cursor"
             },
             "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `dropped` (the default), `name` (the table's name, then its namespace) or `purge` (when its files are deleted)."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; by default `desc` for `dropped`, `asc` for the others."
           },
           {
             "name": "authorization",
@@ -7743,7 +7887,7 @@
           "tables"
         ],
         "summary": "List the tables about to expire",
-        "description": "Lists the managed tables of the environment that expire within `within_days`, soonest first. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 when `within_days` is out of range or the cursor is not one this list issued. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page.",
+        "description": "Lists the managed tables of the environment that expire within `within_days`, soonest first, or in the order `sort` and `order` ask for. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 when `within_days` is out of range, `sort` or `order` is unknown, or the cursor is not one this list issued in this order. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page.",
         "operationId": "list_expiring_tables_api_v1_environments__env__expiring_tables_get",
         "parameters": [
           {
@@ -7821,6 +7965,42 @@
               "title": "Cursor"
             },
             "description": "The `X-Next-Cursor` of the previous page; send the same `within_days` and `namespace`."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `expires` (the default) or `name` (the table's name, then its namespace)."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; `asc` by default."
           },
           {
             "name": "authorization",
@@ -11206,7 +11386,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 5244
+                  "maxLength": 6144
                 },
                 {
                   "type": "null"
@@ -11999,7 +12179,7 @@
           "groups"
         ],
         "summary": "List groups",
-        "description": "Lists the groups, newest first. `member` lists only the groups that principal belongs to now, and answers 404 when no principal has that name. Needs the `ADMIN` role on the instance. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page.",
+        "description": "Lists the groups, newest first, or in the order `sort` and `order` ask for. `member` lists only the groups that principal belongs to now, and answers 404 when no principal has that name. Needs the `ADMIN` role on the instance. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page. Answers 422 for an unknown `sort` or `order`, or a cursor this list did not issue in this order; send the same sort with every page.",
         "operationId": "list_groups_api_v1_groups_get",
         "parameters": [
           {
@@ -12059,7 +12239,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 512
+                  "maxLength": 6144
                 },
                 {
                   "type": "null"
@@ -12068,6 +12248,42 @@
               "title": "Cursor"
             },
             "description": "The `X-Next-Cursor` of the previous page; send the same `q` and `member`."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `created` (the default) or `name`."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; by default `desc` for `created`, `asc` for `name`."
           },
           {
             "name": "authorization",
@@ -12935,7 +13151,7 @@
           "tokens"
         ],
         "summary": "List every owner's live tokens",
-        "description": "Lists the personal access tokens that are neither revoked nor expired, newest first, each with its owner. The token values are never included. Needs the `ADMIN` role on the instance; a task or CI token is refused. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page. Answers 404 when `owner` names no principal.",
+        "description": "Lists the personal access tokens that are neither revoked nor expired, newest first (or in the order `sort` and `order` ask for), each with its owner. The token values are never included. Needs the `ADMIN` role on the instance; a task or CI token is refused. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page. Answers 404 when `owner` names no principal. Answers 422 for an unknown `sort` or `order`, or a cursor this list did not issue in this order; send the same sort with every page.",
         "operationId": "list_all_tokens_api_v1_tokens_get",
         "parameters": [
           {
@@ -12977,7 +13193,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 512
+                  "maxLength": 6144
                 },
                 {
                   "type": "null"
@@ -12986,6 +13202,42 @@
               "title": "Cursor"
             },
             "description": "The `X-Next-Cursor` of the previous page; send the same `owner`."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `created` (the default), `owner`, `name`, `last_used` or `expires`; a token never used or that never ends comes last."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; by default `desc` for `created` and `last_used`, `asc` for the others."
           },
           {
             "name": "authorization",
@@ -13070,7 +13322,7 @@
           "task-tokens"
         ],
         "summary": "List the live task tokens",
-        "description": "Lists the task tokens that are neither revoked nor expired, newest first, each with the principal it signs in as, its environment and asset scope, its dates and, for a token a worker minted for a task, the run, job and asset. The token values are never included. Needs the `ADMIN` role on the instance; a task or CI token is refused. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page. An `environment` no token names gives an empty list, not a 404.",
+        "description": "Lists the task tokens that are neither revoked nor expired, newest first (or in the order `sort` and `order` ask for), each with the principal it signs in as, its environment and asset scope, its dates and, for a token a worker minted for a task, the run, job and asset. The token values are never included. Needs the `ADMIN` role on the instance; a task or CI token is refused. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page. An `environment` no token names gives an empty list, not a 404. Answers 422 for an unknown `sort` or `order`, or a cursor this list did not issue in this order; send the same sort with every page.",
         "operationId": "list_task_tokens_api_v1_task_tokens_get",
         "parameters": [
           {
@@ -13112,7 +13364,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 512
+                  "maxLength": 6144
                 },
                 {
                   "type": "null"
@@ -13121,6 +13373,42 @@
               "title": "Cursor"
             },
             "description": "The `X-Next-Cursor` of the previous page; send the same `environment`."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `issued` (the default), `environment`, `purpose` (the job, else the asset; one minted by hand last), `acts_as` or `expires`."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; by default `desc` for `issued`, `asc` for the others."
           },
           {
             "name": "authorization",
@@ -13501,7 +13789,7 @@
           "grants"
         ],
         "summary": "List grants",
-        "description": "Lists the active grants, newest first. Every filter is optional and narrows the list, except that `principal_name` and `group_name` exclude each other, and so do `role` and `action` (422 when both are given). The object filter matches exactly: `table` with `namespace` and `environment` lists the grants on that table, `namespace` with `environment` those on the namespace, `environment` alone those on the environment. `kind` lists the grants on every object of one kind, in any letter case: `INSTANCE` those on the whole instance, which apply to everything in it; with an object filter it must be that object's kind (422 otherwise). Needs the `ADMIN` role on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header.",
+        "description": "Lists the active grants, newest first, or in the order `sort` and `order` ask for. Every filter is optional and narrows the list, except that `principal_name` and `group_name` exclude each other, and so do `role` and `action` (422 when both are given). The object filter matches exactly: `table` with `namespace` and `environment` lists the grants on that table, `namespace` with `environment` those on the namespace, `environment` alone those on the environment. `kind` lists the grants on every object of one kind, in any letter case: `INSTANCE` those on the whole instance, which apply to everything in it; with an object filter it must be that object's kind (422 otherwise). Needs the `ADMIN` role on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header. Answers 422 for an unknown `sort` or `order`, or a cursor this list did not issue in this order; send the same sort with every page.",
         "operationId": "list_grants_api_v1_grants_get",
         "parameters": [
           {
@@ -13669,7 +13957,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 512
+                  "maxLength": 8864
                 },
                 {
                   "type": "null"
@@ -13678,6 +13966,42 @@
               "title": "Cursor"
             },
             "description": "The `X-Next-Cursor` of the previous page; send the same filters."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `granted` (the default), `who`, `what` or `on`."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; by default `desc` for `granted`, `asc` for the others."
           },
           {
             "name": "authorization",
@@ -14020,7 +14344,7 @@
           "row-filters"
         ],
         "summary": "List row filters",
-        "description": "Lists the active row filters, newest first. Every filter is optional, and they combine: `principal_name` or `group_name` (not both) for whom a row filter is made to, and `environment`, with `namespace` and then `table`, for where it applies (`namespace` needs `environment`, and `table` needs `namespace`; 422 otherwise). Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header.",
+        "description": "Lists the active row filters, newest first, or in the order `sort` and `order` ask for. Every filter is optional, and they combine: `principal_name` or `group_name` (not both) for whom a row filter is made to, and `environment`, with `namespace` and then `table`, for where it applies (`namespace` needs `environment`, and `table` needs `namespace`; 422 otherwise). Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header. Answers 422 for an unknown `sort` or `order`, or a cursor this list did not issue in this order; send the same sort with every page.",
         "operationId": "list_row_filters_api_v1_row_filters_get",
         "parameters": [
           {
@@ -14129,7 +14453,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 512
+                  "maxLength": 8864
                 },
                 {
                   "type": "null"
@@ -14138,6 +14462,42 @@
               "title": "Cursor"
             },
             "description": "The `X-Next-Cursor` of the previous page; send the same filters."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `created` (the default), `who` or `on`."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; by default `desc` for `created`, `asc` for the others."
           },
           {
             "name": "authorization",
@@ -14480,7 +14840,7 @@
           "column-masks"
         ],
         "summary": "List column masks",
-        "description": "Lists the active column masks, newest first. Every filter is optional, and they combine: `principal_name` or `group_name` (not both) for whom a column mask is made to, and `environment`, with `namespace` and then `table`, for where it applies (`namespace` needs `environment`, and `table` needs `namespace`; 422 otherwise). Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header.",
+        "description": "Lists the active column masks, newest first, or in the order `sort` and `order` ask for. Every filter is optional, and they combine: `principal_name` or `group_name` (not both) for whom a column mask is made to, and `environment`, with `namespace` and then `table`, for where it applies (`namespace` needs `environment`, and `table` needs `namespace`; 422 otherwise). Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header. Answers 422 for an unknown `sort` or `order`, or a cursor this list did not issue in this order; send the same sort with every page.",
         "operationId": "list_column_masks_api_v1_column_masks_get",
         "parameters": [
           {
@@ -14589,7 +14949,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 512
+                  "maxLength": 8864
                 },
                 {
                   "type": "null"
@@ -14598,6 +14958,42 @@
               "title": "Cursor"
             },
             "description": "The `X-Next-Cursor` of the previous page; send the same filters."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `created` (the default), `who`, `on` or `column`."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; by default `desc` for `created`, `asc` for the others."
           },
           {
             "name": "authorization",
@@ -15476,7 +15872,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 5244
+                  "maxLength": 6144
                 },
                 {
                   "type": "null"
@@ -15502,7 +15898,7 @@
               ],
               "title": "Sort"
             },
-            "description": "What the list is sorted by: `created` (the default), `name` (in any letter case) or `status`, the last test: failed first, then queued or running, then passed, never tested last; one state by name."
+            "description": "What the list is sorted by: `created` (the default), `name` (in any letter case) or `status`, the last test: failed first, then queued or running, then passed, never tested last; `kind` or `environment`; one state, kind or environment by name."
           },
           {
             "name": "order",
@@ -16192,7 +16588,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 5244
+                  "maxLength": 6144
                 },
                 {
                   "type": "null"
@@ -17977,7 +18373,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 5244
+                  "maxLength": 6144
                 },
                 {
                   "type": "null"
@@ -18003,7 +18399,7 @@
               ],
               "title": "Sort"
             },
-            "description": "What the list is sorted by: `created` (the default) or `status`; deploys of one state come newest first."
+            "description": "What the list is sorted by: `created` (the default), `status`, `kind`, `repository` or `who` (whoever asked; a deploy whose submitter was deleted last); deploys of one value come newest first."
           },
           {
             "name": "order",
@@ -18753,7 +19149,7 @@
           "deploys"
         ],
         "summary": "List tables no project produces any more, one page at a time",
-        "description": "Lists the tables that earlier project versions produced and the current ones do not, including dropped ones that can still be restored (`exists` is false). Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 for a cursor this list did not issue.",
+        "description": "Lists the tables that earlier project versions produced and the current ones do not, including dropped ones that can still be restored (`exists` is false), by repository or in the order `sort` and `order` ask for. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 for an unknown `sort` or `order`, or a cursor this list did not issue in this order.",
         "operationId": "list_orphans_api_v1_environments__env__orphans_get",
         "parameters": [
           {
@@ -18796,6 +19192,42 @@
               "title": "Cursor"
             },
             "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `repository` (the default, then the table), `name` (the table's name) or `kind`."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; `asc` by default."
           },
           {
             "name": "authorization",
@@ -18936,7 +19368,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 5244
+                  "maxLength": 6144
                 },
                 {
                   "type": "null"
@@ -19289,7 +19721,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 5244
+                  "maxLength": 6144
                 },
                 {
                   "type": "null"
@@ -19315,7 +19747,7 @@
               ],
               "title": "Sort"
             },
-            "description": "What the list is sorted by: `created` (the default), `name` (the job's, else the repository's, in any letter case) or `status`; runs of one name or state come newest first."
+            "description": "What the list is sorted by: `created` (the default), `name` (the job's, else the repository's, in any letter case), `status`, `environment`, `trigger` (a run started with `lakana run`, which has none, last), `duration` (to now for one still going; one not started last) or `tasks` (how many); runs of one value come newest first."
           },
           {
             "name": "order",
@@ -19333,7 +19765,7 @@
               ],
               "title": "Order"
             },
-            "description": "`asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the others."
+            "description": "`asc` or `desc`; by default `desc` for `created` (the newest first), `duration` (the longest first) and `tasks` (the most first), `asc` for the others."
           },
           {
             "name": "authorization",
@@ -21578,7 +22010,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 5244
+                  "maxLength": 6144
                 },
                 {
                   "type": "null"
@@ -21966,7 +22398,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 512
+                  "maxLength": 8864
                 },
                 {
                   "type": "null"
@@ -21992,7 +22424,7 @@
               ],
               "title": "Sort"
             },
-            "description": "What the log is sorted by: `occurred`, the only field."
+            "description": "What the log is sorted by: `occurred` (the default), `event` (the type), `who` (the principal's name; an event of none last) or `on` (the environment, namespace and table; an event on the whole instance first); the events of one value newest first."
           },
           {
             "name": "order",
@@ -22010,7 +22442,7 @@
               ],
               "title": "Order"
             },
-            "description": "`desc` (the newest first, the default) or `asc` (the oldest first)."
+            "description": "For `occurred`, `desc` (the newest first, the default) or `asc` (the oldest first); `asc` by default for the others."
           },
           {
             "name": "authorization",

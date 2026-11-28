@@ -15,6 +15,7 @@ import {
 import { item } from "../test/catalog";
 import { held } from "../test/pending";
 import { renderShell } from "../test/render";
+import { expectServerSorts, sortBy } from "../test/sorting";
 import { type FakeRoute, whoami } from "../test/server";
 import { fakeWebAuthn } from "../test/webauthn";
 
@@ -111,7 +112,7 @@ describe("FiltersAndMasksPage", () => {
       expect(screen.getAllByText("No principal named 'nobody'.")).toHaveLength(2);
     });
 
-    await user.click(screen.getByRole("button", { name: /Who$/ }));
+    await user.click(screen.getByRole("button", { name: /Who$/, expanded: false }));
     await user.click(await screen.findByRole("option", { name: "Anyone" }));
 
     expect(screen.queryByText("No principal named 'nobody'.")).toBeNull();
@@ -473,7 +474,7 @@ describe("FiltersAndMasksPage", () => {
         "GET /api/v1/groups": { status: 200, body: [{ name: "marketing" }] },
       }),
     });
-    await user.click(await screen.findByRole("button", { name: /Who$/ }));
+    await user.click(await screen.findByRole("button", { name: /Who$/, expanded: false }));
     await user.click(await screen.findByRole("option", { name: "A person" }));
     const name = screen.getByRole("combobox", { name: "Name" });
 
@@ -485,7 +486,7 @@ describe("FiltersAndMasksPage", () => {
     });
     // The field stays, with the focus in it.
     expect(name).toHaveFocus();
-    await user.click(screen.getByRole("button", { name: /Who$/ }));
+    await user.click(screen.getByRole("button", { name: /Who$/, expanded: false }));
     await user.click(await screen.findByRole("option", { name: "A group" }));
     await waitFor(() => {
       expect(screen.queryByRole("option", { name: "A group" })).toBeNull();
@@ -499,7 +500,7 @@ describe("FiltersAndMasksPage", () => {
 
   it("keeps the focus in Who's Name once a typed name applies", async () => {
     const { user, router } = renderShell(PATH, { routes: policyRoutes() });
-    await user.click(await screen.findByRole("button", { name: /Who$/ }));
+    await user.click(await screen.findByRole("button", { name: /Who$/, expanded: false }));
     await user.click(await screen.findByRole("option", { name: "A group" }));
     const name = screen.getByRole("combobox", { name: "Name" });
 
@@ -520,7 +521,7 @@ describe("FiltersAndMasksPage", () => {
         "GET /api/v1/whoami": { status: 200, body: whoami("pat", false, true, false, [], true) },
       }),
     });
-    await user.click(await screen.findByRole("button", { name: /Who$/ }));
+    await user.click(await screen.findByRole("button", { name: /Who$/, expanded: false }));
     await user.click(await screen.findByRole("option", { name: "A group" }));
 
     await user.type(screen.getByRole("combobox", { name: "Name" }), "analysts{ArrowDown}{Enter}");
@@ -574,5 +575,29 @@ describe("FiltersAndMasksPage", () => {
     await waitFor(() => {
       expect(reads()).toBeGreaterThan(before);
     });
+  });
+});
+
+describe("FiltersAndMasksPage's sorts", () => {
+  it("sorts each list on the server by its own columns, apart in the address", async () => {
+    const { user, server, router } = renderShell(PATH, { routes: policyRoutes() });
+    const filters = await screen.findByRole("region", { name: "Row filters" });
+    const masks = await screen.findByRole("region", { name: "Column masks" });
+    expect(within(filters).queryByRole("button", { name: "Expression" })).toBeNull();
+    expect(within(filters).queryByRole("button", { name: "Column" })).toBeNull();
+
+    await expectServerSorts(user, filters, server.sent, "/api/v1/row-filters", [
+      ["Who", "sort=who&order=asc"],
+      ["On", "sort=on&order=asc"],
+    ]);
+    await expectServerSorts(user, masks, server.sent, "/api/v1/column-masks", [
+      ["Column", "sort=column&order=asc"],
+    ]);
+    // Created is the list's own order, the newest first; pressed again, the oldest first.
+    await sortBy(user, masks, "Created");
+    await expectServerSorts(user, masks, server.sent, "/api/v1/column-masks", [
+      ["Created", "sort=created&order=asc"],
+    ]);
+    expect(router.state.location.search).toBe("?filtersSort=on&masksSort=created&masksOrder=asc");
   });
 });

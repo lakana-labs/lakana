@@ -7,6 +7,7 @@ import { freshSession, STALE_SESSION, STEP_UP_ROUTES } from "../test/access";
 import { renderShell } from "../test/render";
 import { type FakeRoute, whoami } from "../test/server";
 import { fakeWebAuthn } from "../test/webauthn";
+import { columnTexts, sortBy, sortState } from "../test/sorting";
 import { unreachable } from "./DeletedEnvironments";
 
 /** A deleted environment whose files are kept a week longer. */
@@ -86,6 +87,32 @@ function asAdmin(routes: Record<string, FakeRoute>): Parameters<typeof renderShe
 }
 
 describe("DeletedEnvironments", () => {
+  it("sorts by name, deletion and the files' deletion, under its own names in the address", async () => {
+    const later = {
+      ...HDFS_OLD,
+      deleted_at: "2026-11-12T09:00:00Z",
+      purge_after: "2099-11-20T09:00:00Z",
+    };
+    const { user, router } = renderShell(
+      "/settings/environments",
+      asMara(lists([], [later, DEV_OLD])),
+    );
+    const heading = await screen.findByRole("heading", { name: "Deleted environments" });
+    const section = heading.closest("section") as HTMLElement;
+    await within(section).findByText("dev-old");
+
+    await sortBy(user, section, "Name");
+    expect(columnTexts(section)).toEqual(["dev-old", "hdfs-old"]);
+    expect(router.state.location.search).toBe("?deletedSort=name");
+    await sortBy(user, section, "Deleted");
+    expect(sortState(section, "Deleted")).toBe("descending");
+    expect(columnTexts(section)).toEqual(["hdfs-old", "dev-old"]);
+    await sortBy(user, section, "Files deleted after");
+    expect(columnTexts(section)).toEqual(["hdfs-old", "dev-old"]);
+    await sortBy(user, section, "Files deleted after");
+    expect(columnTexts(section)).toEqual(["dev-old", "hdfs-old"]);
+  });
+
   it("restores without a touch and puts the focus on it", async () => {
     const live: EnvironmentOut[] = [];
     const deleted = [DEV_OLD];

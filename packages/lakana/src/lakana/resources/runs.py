@@ -370,7 +370,8 @@ class Runs:
             Only runs created at or after this time, which needs a time zone.
         sort
             What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else
-            the repository's, in any letter case) or ``status``; runs of one name or state
+            the repository's, in any letter case), ``status``, ``environment``, ``trigger``,
+            ``duration`` (the longest first) or ``tasks`` (the most first); runs of one value
             come newest first. Send the same sort with every page.
         order
             ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
@@ -437,7 +438,8 @@ class Runs:
             Only runs created at or after this time, which needs a time zone.
         sort
             What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else
-            the repository's, in any letter case) or ``status``; runs of one name or state
+            the repository's, in any letter case), ``status``, ``environment``, ``trigger``,
+            ``duration`` (the longest first) or ``tasks`` (the most first); runs of one value
             come newest first. Send the same sort with every page.
         order
             ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
@@ -508,7 +510,8 @@ class Runs:
             Only runs created at or after this time, which needs a time zone.
         sort
             What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else
-            the repository's, in any letter case) or ``status``; runs of one name or state
+            the repository's, in any letter case), ``status``, ``environment``, ``trigger``,
+            ``duration`` (the longest first) or ``tasks`` (the most first); runs of one value
             come newest first. Send the same sort with every page.
         order
             ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
@@ -578,7 +581,8 @@ class Runs:
             Only runs created at or after this time, which needs a time zone.
         sort
             What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else
-            the repository's, in any letter case) or ``status``; runs of one name or state
+            the repository's, in any letter case), ``status``, ``environment``, ``trigger``,
+            ``duration`` (the longest first) or ``tasks`` (the most first); runs of one value
             come newest first. Send the same sort with every page.
         order
             ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
@@ -656,7 +660,8 @@ class Runs:
             Only runs created at or after this time, which needs a time zone.
         sort
             What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else
-            the repository's, in any letter case) or ``status``; runs of one name or state
+            the repository's, in any letter case), ``status``, ``environment``, ``trigger``,
+            ``duration`` (the longest first) or ``tasks`` (the most first); runs of one value
             come newest first. Send the same sort with every page.
         order
             ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.

@@ -7,6 +7,7 @@ import type { RunOut } from "../api/jobs";
 import { aJob, aJobRun, ENVIRONMENTS } from "../test/jobs";
 import { held } from "../test/pending";
 import { type FakeRoute, fakeServer } from "../test/server";
+import { expectServerSorts } from "../test/sorting";
 import { RunsTab } from "./RunsTab";
 
 const RUNS = "GET /api/v1/runs";
@@ -495,7 +496,7 @@ describe("RunsTab", () => {
     const { server, user } = renderTab(page([older]));
     await screen.findByRole("region", { name: "Runs listed" });
 
-    await user.click(screen.getByRole("button", { name: /^Environment/u }));
+    await user.click(screen.getByRole("button", { name: /^Environment/u, expanded: false }));
     await user.click(screen.getByRole("option", { name: /^prod/u }));
     await waitFor(() => {
       expect(runReads(server.sent).at(-1)?.get("environment")).toBe("prod");
@@ -846,6 +847,19 @@ describe("RunsTab's sort", () => {
       expect(runReads(server.sent).at(-1)?.get("sort")).toBe("status");
     });
     expect(screen.getByTestId("address")).toHaveTextContent("?status=failed&sort=status");
+  });
+
+  it("sorts by the environment, what started it, duration and tasks", async () => {
+    const { server, user } = renderTab(page([older]));
+    await screen.findByRole("region", { name: "Runs listed" });
+    // The region is drawn again with each new order.
+    const region = (): HTMLElement => screen.getByRole("region", { name: "Runs listed" });
+    await expectServerSorts(user, region, server.sent, "/api/v1/runs", [
+      ["Started by", "sort=trigger&order=asc"],
+      ["Environment", "sort=environment&order=asc"],
+      ["Duration", "sort=duration&order=desc"],
+      ["Tasks", "sort=tasks&order=desc"],
+    ]);
   });
 
   it("opens a shared link sorted the same way", async () => {

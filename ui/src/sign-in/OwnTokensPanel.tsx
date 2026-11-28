@@ -37,6 +37,9 @@ import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
 import { markedText, VisibleText } from "../shell/VisibleText";
 import { AttemptStatus, useAttempt } from "./Attempt";
+import { type ListSortSpec, sortRows } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import { type ProviderAccount, TokenWindowLine } from "./ProviderSection";
 
 /** Properties of {@link OwnTokensPanel}. */
@@ -153,6 +156,13 @@ function CreateTokenDialog({ owner, onClose }: CreateTokenDialogProps): JSX.Elem
   );
 }
 
+/** The columns one's own tokens sort by, in the browser: they are read whole. */
+const OWN_TOKEN_SORT: ListSortSpec<"name" | "state" | "created" | "lastUsed" | "expires"> = {
+  fields: { name: "asc", state: "asc", created: "desc", lastUsed: "desc", expires: "asc" },
+  natural: null,
+  param: "tokens",
+};
+
 /**
  * Renders the panel "API tokens": the purpose, for a linked person until when the tokens work,
  * every token of the person's with its state and
@@ -167,6 +177,7 @@ function CreateTokenDialog({ owner, onClose }: CreateTokenDialogProps): JSX.Elem
 export function OwnTokensPanel({ name, account = null }: OwnTokensPanelProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
+  const sorting = useListSort(OWN_TOKEN_SORT);
   const heading = useId();
   // Expiry is judged at the time of the read, so a render never asks the clock.
   const load = useCallback(
@@ -210,18 +221,27 @@ export function OwnTokensPanel({ name, account = null }: OwnTokensPanelProps): J
               <table className="list">
                 <thead>
                   <tr>
-                    <th scope="col">{t("tokens.name")}</th>
-                    <th scope="col">{t("tokens.state")}</th>
-                    <th scope="col">{t("tokens.created")}</th>
-                    <th scope="col">{t("tokens.lastUsed")}</th>
-                    <th scope="col">{t("tokens.expires")}</th>
+                    <SortHeader {...sorting.header("name")}>{t("tokens.name")}</SortHeader>
+                    <SortHeader {...sorting.header("state")}>{t("tokens.state")}</SortHeader>
+                    <SortHeader {...sorting.header("created")}>{t("tokens.created")}</SortHeader>
+                    <SortHeader {...sorting.header("lastUsed")}>{t("tokens.lastUsed")}</SortHeader>
+                    <SortHeader {...sorting.header("expires")}>{t("tokens.expires")}</SortHeader>
                     <th scope="col">
                       <span className="visually-hidden">{t("list.actions")}</span>
                     </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {inListOrder(found, now).map((token) => (
+                  {sortRows(inListOrder(found, now), sorting.sort, {
+                    name: (token) => token.name,
+                    // Active first going up, then the revoked, then the expired.
+                    state: (token) =>
+                      token.revoked_at !== null ? 1 : tokenEnded(token, now) ? 2 : 0,
+                    created: (token) => token.created_at,
+                    // Never used, or never expiring, sorts last.
+                    lastUsed: (token) => token.last_used_at,
+                    expires: (token) => token.expires_at,
+                  }).map((token) => (
                     <tr key={token.key_id}>
                       <td>
                         <span className="row-name">

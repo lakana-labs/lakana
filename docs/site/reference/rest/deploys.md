@@ -59,7 +59,7 @@ Parameters:
 | `repository` | query | no | text or null | Only this repository's deploys. |
 | `limit` | query | no | whole number | Most deploys returned (1 to 200). |
 | `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page. |
-| `sort` | query | no | text or null | What the list is sorted by: `created` (the default) or `status`; deploys of one state come newest first. |
+| `sort` | query | no | text or null | What the list is sorted by: `created` (the default), `status`, `kind`, `repository` or `who` (whoever asked; a deploy whose submitter was deleted last); deploys of one value come newest first. |
 | `order` | query | no | text or null | `asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for `status`. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
@@ -296,7 +296,7 @@ Answer fields: `ProjectVersionOut`
 
 List tables no project produces any more, one page at a time
 
-Lists the tables that earlier project versions produced and the current ones do not, including dropped ones that can still be restored (`exists` is false). Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 for a cursor this list did not issue.
+Lists the tables that earlier project versions produced and the current ones do not, including dropped ones that can still be restored (`exists` is false), by repository or in the order `sort` and `order` ask for. Needs `READ_ENVIRONMENT`. Answers 404 when the environment does not exist and 422 for an unknown `sort` or `order`, or a cursor this list did not issue in this order.
 
 Parameters:
 
@@ -305,6 +305,8 @@ Parameters:
 | `env` | path | yes | text | Environment name. |
 | `limit` | query | no | whole number | Most orphans returned (1 to 200). |
 | `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
+| `sort` | query | no | text or null | What the list is sorted by: `repository` (the default, then the table), `name` (the table's name) or `kind`. |
+| `order` | query | no | text or null | `asc` or `desc`; `asc` by default. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:

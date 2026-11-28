@@ -77,6 +77,8 @@ function instant(iso: string | null): number | null {
  */
 const SORT_VALUES: Readonly<Record<string, (job: JobOut) => string | number | null>> = {
   status: (job) => job.last_run_status,
+  repository: (job) => job.repository.toLowerCase(),
+  environment: (job) => job.environment.toLowerCase(),
   last_run: (job) => instant(job.last_run_at),
   next_run: (job) => instant(job.next_run_at),
 };

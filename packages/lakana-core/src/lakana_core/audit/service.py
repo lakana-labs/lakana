@@ -16,8 +16,9 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import String, and_, false, or_, select, type_coerce
+from sqlalchemy import Select, String, and_, false, or_, select, type_coerce
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.content import hidden_fields, shown_detail, warn_unclassified
@@ -25,14 +26,27 @@ from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securab
 from lakana_core.config import ViewAuditConfig
 from lakana_core.errors import ValidationError
 from lakana_core.models import AuditEvent, AuditEventType, Principal
-from lakana_core.pagination import parse_sort
+from lakana_core.pagination import (
+    CursorValue,
+    KeyType,
+    ListSort,
+    SortedPosition,
+    SortKey,
+    keyset_sorted,
+    name_order,
+    parse_sort,
+    place_keys,
+)
 
 ACCESS_APPLY_KEY = "lakana.access_apply_id"
 """The `Session.info` key under which `lakana_core.access.managed.applying` keeps the apply's id."""
 
 
-AUDIT_SORTS: dict[str, bool] = {"occurred": True}
-"""The fields the audit log sorts by: when an event occurred, the newest first by default."""
+AUDIT_SORTS: dict[str, bool] = {"occurred": True, "event": False, "who": False, "on": False}
+"""The fields the audit log sorts by: when an event occurred, the newest first by default; its
+type, whom it is attributed to and what it is on, each from A and then the newest first. A reader
+of the log sees all four of every event (`_shown` hides only the content of `detail`), so no sort
+orders by what a reader may not see."""
 
 AUDIT_DEFAULT_SORT = "occurred:desc"
 """The order of the audit log when none is asked: the newest first."""
@@ -57,6 +71,66 @@ class AuditCursor:
     occurred_at: datetime
     id: uuid.UUID
     sort: str = AUDIT_DEFAULT_SORT
+    values: tuple[CursorValue, ...] = ()
+
+
+def audit_sort_keys(session: Session, field: str) -> tuple[SortKey, ...]:
+    """Give the keys the audit log is sorted by in a field other than ``occurred``.
+
+    Parameters
+    ----------
+    session
+        The session the log is read in, for the way its database compares names.
+    field
+        A key of `AUDIT_SORTS` other than ``occurred``.
+
+    Returns
+    -------
+    tuple of SortKey
+        The field's own keys (``event``: the type as stored; ``who``: the principal's name, an
+        event of no principal last; ``on``: the environment, namespace and table, an event on
+        the whole instance first), then the time it occurred, the newest first.
+    """
+    principal = select(Principal.name).where(Principal.id == AuditEvent.principal_id)
+    own = {
+        "event": (SortKey(type_coerce(AuditEvent.event_type, String), str),),
+        "who": (SortKey(name_order(session, principal.scalar_subquery()), str, nullable=True),),
+        "on": place_keys(
+            session,
+            AuditEvent.securable_environment,
+            AuditEvent.securable_namespace,
+            AuditEvent.securable_table,
+        ),
+    }[field]
+    return (*own, SortKey(AuditEvent.occurred_at, datetime, descending=True))
+
+
+def audit_cursor_types(sort: str) -> list[KeyType]:
+    """Give the types of the keys a cursor of the audit log read in `sort` holds.
+
+    Parameters
+    ----------
+    sort
+        The sort the cursor names, ``<field>:<asc|desc>``.
+
+    Returns
+    -------
+    list
+        One type a key: text for the field's own keys, then a time.
+
+    Raises
+    ------
+    ValidationError
+        If `sort` names no field of the log but ``occurred``, whose cursor holds no keys.
+    """
+    field = sort.partition(":")[0]
+    if field not in AUDIT_SORTS or field == "occurred":
+        raise ValidationError(
+            "The cursor is not valid. Start the listing again without `cursor`; pass the "
+            "`next_cursor` of a page only to continue that listing."
+        )
+    own = 3 if field == "on" else 1
+    return [*([str] * own), datetime]
 
 
 @dataclass(frozen=True)
@@ -287,10 +361,13 @@ class AuditService:
             ``CONNECTION_*`` type. It combines with `event_type`, which must then be of the
             kind. A new kind is added in `EVENT_KINDS`.
         sort
-            What the log is sorted by: ``occurred``, the only field, when nothing is given.
-            Every order shows the same events; only their sequence changes.
+            What the log is sorted by: ``occurred`` (the default), ``event`` (the type),
+            ``who`` (the principal's name; an event of none last) or ``on`` (the environment,
+            namespace and table; an event on the whole instance first), the events of one
+            value newest first. Every order shows the same events; only their sequence changes.
         order
-            ``desc`` (the default, the newest first) or ``asc``, the oldest first.
+            ``asc`` or ``desc``. For ``occurred`` ``desc`` (the newest first) by default, ``asc``
+            the oldest first; for the others ``asc`` by default.
         principal_name
             Only return events attributed to the principal of this name, if given: the same
             filter as its `principal_id`, recorded as one. A name nobody has matches no event.
@@ -362,6 +439,25 @@ class AuditService:
             stmt = stmt.where(AuditEvent.occurred_at >= since)
         if until is not None:
             stmt = stmt.where(AuditEvent.occurred_at <= until)
+        filters: dict[str, object] = {
+            "event_type": None if event_type is None else event_type.value,
+            "kind": kind,
+            "environment": environment,
+            "since": None if since is None else since.isoformat(),
+            "until": None if until is None else until.isoformat(),
+            "limit": limit,
+        }
+        if chosen.field != "occurred":
+            return self._sorted_page(
+                p,
+                self._authz,
+                stmt,
+                chosen,
+                cursor,
+                limit,
+                principal_id=principal_id,
+                filters=filters,
+            )
         if cursor is not None and chosen.descending:
             stmt = stmt.where(
                 or_(
@@ -384,22 +480,76 @@ class AuditService:
         found = [(row, str(raw)) for row, raw in self._session.execute(stmt).all()]
         rows = [row for row, _ in found[:limit]]
         raw_types = {row.id: raw for row, raw in found[:limit]}
-        self._record_read(
-            p,
-            rows,
-            filters={
-                "event_type": None if event_type is None else event_type.value,
-                "kind": kind,
-                "environment": environment,
-                "since": None if since is None else since.isoformat(),
-                "until": None if until is None else until.isoformat(),
-                "limit": limit,
-            },
-            principal_id=principal_id,
-        )
+        self._record_read(p, rows, filters=filters, principal_id=principal_id)
         items = _shown(self._authz, p, rows, raw_types, self._names(rows))
         last = rows[-1] if len(found) > limit else None
         next_cursor = None if last is None else AuditCursor(last.occurred_at, last.id, chosen.name)
+        return AuditPage(items=items, next_cursor=next_cursor)
+
+    def _sorted_page(
+        self,
+        p: PrincipalRef,
+        authz: AuthorizationService,
+        stmt: Select[*tuple[Any, ...]],
+        chosen: ListSort,
+        cursor: AuditCursor | None,
+        limit: int,
+        *,
+        principal_id: uuid.UUID | None,
+        filters: dict[str, object],
+    ) -> AuditPage:
+        """Read one page of the log in a sort other than by time, recorded and hidden as `query`.
+
+        Parameters
+        ----------
+        p
+            The reader, already allowed to read the log.
+        authz
+            Answers whether `p` may see the content of another principal's event.
+        stmt
+            The events and their stored types, filtered.
+        chosen
+            The sort.
+        cursor
+            Where the previous page ended, read in the same sort.
+        limit
+            The most events returned.
+        principal_id
+            The principal the events are filtered on, if any.
+        filters
+            The filters, as the record of the read names them.
+
+        Returns
+        -------
+        AuditPage
+            The events, and the cursor of the next page with the keys of the last one.
+
+        Raises
+        ------
+        ValidationError
+            If `cursor` holds keys of another sort.
+        """
+        keys = audit_sort_keys(self._session, chosen.field)
+        at = None
+        if cursor is not None:
+            if len(cursor.values) != len(keys):
+                raise ValidationError(
+                    "The cursor is not valid. Start the listing again without `cursor`; pass the "
+                    "`next_cursor` of a page only to continue that listing."
+                )
+            at = SortedPosition(cursor.values, cursor.id)
+        ordered = keyset_sorted(stmt, keys, AuditEvent.id, chosen.descending, at)
+        found = list(self._session.execute(ordered.limit(limit + 1)).all())
+        rows = [row[0] for row in found[:limit]]
+        raw_types = {row[0].id: str(row[1]) for row in found[:limit]}
+        self._record_read(p, rows, filters=filters, principal_id=principal_id)
+        items = _shown(authz, p, rows, raw_types, self._names(rows))
+        next_cursor = None
+        if len(found) > limit:
+            last = found[limit - 1]
+            next_cursor = AuditCursor(
+                last[0].occurred_at, last[0].id, chosen.name, tuple(last[2:-1])
+            )
         return AuditPage(items=items, next_cursor=next_cursor)
 
     def _names(self, rows: Sequence[AuditEvent]) -> dict[uuid.UUID, str]:

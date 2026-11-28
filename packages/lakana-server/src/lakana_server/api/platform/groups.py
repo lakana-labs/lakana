@@ -8,7 +8,7 @@ from lakana_core.auth import PrincipalRef
 from lakana_core.identity.groups import GroupService
 from lakana_core.identity.pictures import PictureService
 from lakana_core.identity.principals import PrincipalService
-from lakana_server.api.platform.listing import set_next_cursor
+from lakana_server.api.platform.listing import CursorParam, OrderParam, SortParam, set_next_cursor
 from lakana_server.api.platform.principals import principals_out
 from lakana_server.api.platform.schemas import GroupCreate, GroupOut, PrincipalOut
 from lakana_server.api.responses import errors
@@ -71,16 +71,20 @@ def list_groups(
     q: str | None = Query(default=None, max_length=255),
     member: str | None = Query(default=None, max_length=255),
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     service: GroupService = Depends(get_group_service),
 ) -> list[GroupOut]:
     """List groups.
 
-    Lists the groups, newest first. `member` lists only the groups that principal belongs to
-    now, and answers 404 when no principal has that name. Needs the `ADMIN` role on the
-    instance. The cursor of the next page is in the `X-Next-Cursor` response header and is
-    absent on the last page.
+    Lists the groups, newest first, or in the order `sort` and `order` ask for. `member` lists
+    only the groups that principal belongs to now, and answers 404 when no principal has that
+    name. Needs the `ADMIN` role on the instance. The cursor of the next page is in the
+    `X-Next-Cursor` response header and is absent on the last page. Answers 422 for an unknown
+    `sort` or `order`, or a cursor this list did not issue in this order; send the same sort
+    with every page.
 
     Parameters
     ----------
@@ -94,6 +98,10 @@ def list_groups(
         Most groups returned (1 to 200).
     cursor
         The `X-Next-Cursor` of the previous page; send the same `q` and `member`.
+    sort
+        What the list is sorted by: `created` (the default) or `name`.
+    order
+        `asc` or `desc`; by default `desc` for `created`, `asc` for `name`.
     principal
         The authenticated caller.
     service
@@ -104,7 +112,9 @@ def list_groups(
     list of GroupOut
         The groups of this page.
     """
-    page = service.list_groups(principal, q=q, member=member, limit=limit, cursor=cursor)
+    page = service.list_groups(
+        principal, q=q, member=member, limit=limit, cursor=cursor, sort=sort, order=order
+    )
     set_next_cursor(response, page.next_cursor)
     return [GroupOut.model_validate(row) for row in page.items]
 

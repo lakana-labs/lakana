@@ -29,6 +29,9 @@ import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
 import { problemText } from "../sign-in/messages";
 import "./environments.css";
+import { type ListSortSpec, sortRows } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import "./leftoverStrings";
 
 const L = "settings.leftover";
@@ -84,6 +87,13 @@ export interface LeftoverDirectoriesProps {
   readonly name: string;
 }
 
+/** The columns the leftover directories sort by, in the browser: the report is read whole. */
+const LEFTOVER_SORT: ListSortSpec<"location" | "files" | "bytes" | "newest" | "state"> = {
+  fields: { location: "asc", files: "desc", bytes: "desc", newest: "desc", state: "asc" },
+  natural: null,
+  param: "leftover",
+};
+
 /**
  * Renders the panel: the age, Find, what was found, and Delete the old ones with its report.
  *
@@ -94,6 +104,7 @@ export interface LeftoverDirectoriesProps {
 export function LeftoverDirectories({ name }: LeftoverDirectoriesProps): JSX.Element {
   const { t, i18n } = useTranslation();
   const when = useWhen();
+  const sorting = useListSort(LEFTOVER_SORT);
   const [days, setDays] = useState(DEFAULT_OLDER_THAN_DAYS);
   const [busy, setBusy] = useState<Shown["kind"] | null>(null);
   const [slowFor, setSlowFor] = useState<Shown["kind"] | null>(null);
@@ -218,19 +229,25 @@ export function LeftoverDirectories({ name }: LeftoverDirectoriesProps): JSX.Ele
               <table className="list list-static">
                 <thead>
                   <tr>
-                    <th scope="col">{t(`${L}.location`)}</th>
-                    <th scope="col" className="number">
+                    <SortHeader {...sorting.header("location")}>{t(`${L}.location`)}</SortHeader>
+                    <SortHeader {...sorting.header("files")} className="number">
                       {t(`${L}.files`)}
-                    </th>
-                    <th scope="col" className="number">
+                    </SortHeader>
+                    <SortHeader {...sorting.header("bytes")} className="number">
                       {t(`${L}.bytes`)}
-                    </th>
-                    <th scope="col">{t(`${L}.newest`)}</th>
-                    <th scope="col">{t(`${L}.state`)}</th>
+                    </SortHeader>
+                    <SortHeader {...sorting.header("newest")}>{t(`${L}.newest`)}</SortHeader>
+                    <SortHeader {...sorting.header("state")}>{t(`${L}.state`)}</SortHeader>
                   </tr>
                 </thead>
                 <tbody>
-                  {locations.map((location) => (
+                  {sortRows(locations, sorting.sort, {
+                    location: (location) => location.location,
+                    files: (location) => location.files,
+                    bytes: (location) => location.bytes,
+                    newest: (location) => location.newest_file_at,
+                    state: (location) => stateOf(t, shown.kind, location),
+                  }).map((location) => (
                     <tr key={location.location}>
                       <td>
                         <span className="row-name leftover-location">

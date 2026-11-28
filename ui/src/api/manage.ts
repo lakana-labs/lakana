@@ -5,6 +5,7 @@
  * @packageDocumentation
  */
 import { api, ApiError } from "./client";
+import { type ListSortChoice, setSort } from "./sorting";
 import { guarded } from "./stepUpFirst";
 import { tableApiPath, type ModelReferenceOut, type TableOut, type TableRef } from "./table";
 
@@ -356,6 +357,7 @@ export async function isProtected(environment: string): Promise<boolean | null> 
  * @param environment - The environment.
  * @param namespace - The dotted namespace; null for the whole environment.
  * @param cursor - The cursor of the page, or null for the first.
+ * @param sort - The sort; null for the list's own order.
  * @returns The page; one namespace's list is a single page.
  * @throws {ApiError} for a refusal.
  */
@@ -363,16 +365,22 @@ export async function listDropped(
   environment: string,
   namespace: string | null,
   cursor: string | null,
+  sort: ListSortChoice | null = null,
 ): Promise<CursorPage<DroppedTableOut>> {
+  const sorted = new URLSearchParams();
+  setSort(sorted, sort);
   if (namespace !== null) {
     const path = environmentPath(
       environment,
       `/namespaces/${encodeURIComponent(namespace)}/dropped-tables`,
     );
-    const items = await api.request<readonly DroppedTableOut[]>("GET", path);
+    const items = await api.request<readonly DroppedTableOut[]>("GET", withQuery(path, sorted));
     return { items, nextCursor: null };
   }
-  const path = withQuery(environmentPath(environment, "/dropped-tables"), pageQuery(cursor));
+  const path = withQuery(
+    environmentPath(environment, "/dropped-tables"),
+    pageQuery(cursor, sorted),
+  );
   const body = await api.request<{
     items: readonly DroppedTableOut[];
     next_cursor: string | null;
@@ -386,6 +394,7 @@ export async function listDropped(
  * @param environment - The environment.
  * @param namespace - Only this dotted namespace and below; null for all.
  * @param cursor - The cursor of the page, or null for the first.
+ * @param sort - The sort; null for the list's own order.
  * @returns The page.
  * @throws {ApiError} for a refusal.
  */
@@ -393,11 +402,13 @@ export async function listExpiring(
   environment: string,
   namespace: string | null,
   cursor: string | null,
+  sort: ListSortChoice | null = null,
 ): Promise<CursorPage<TableRetentionOut>> {
   const query = new URLSearchParams();
   if (namespace !== null) {
     query.set("namespace", namespace);
   }
+  setSort(query, sort);
   pageQuery(cursor, query);
   const page = await api.page(withQuery(environmentPath(environment, "/expiring-tables"), query));
   return { items: page.body as readonly TableRetentionOut[], nextCursor: page.nextCursor };
@@ -408,17 +419,21 @@ export async function listExpiring(
  *
  * @param environment - The environment.
  * @param cursor - The cursor of the page, or null for the first.
+ * @param sort - The sort; null for the list's own order.
  * @returns The page, and how many orphans the person may not read.
  * @throws {ApiError} for a refusal.
  */
 export async function listOrphans(
   environment: string,
   cursor: string | null,
+  sort: ListSortChoice | null = null,
 ): Promise<CursorPage<OrphanOut> & { hidden: number }> {
+  const query = new URLSearchParams();
+  setSort(query, sort);
   const body = await api.request<{
     orphans: readonly OrphanOut[];
     hidden: number;
     next_cursor: string | null;
-  }>("GET", withQuery(environmentPath(environment, "/orphans"), pageQuery(cursor)));
+  }>("GET", withQuery(environmentPath(environment, "/orphans"), pageQuery(cursor, query)));
   return { items: body.orphans, hidden: body.hidden, nextCursor: body.next_cursor };
 }

@@ -25,11 +25,13 @@ from lakana_core.audit.service import (
     AuditCursor,
     AuditService,
     ShownAuditEvent,
+    audit_cursor_types,
 )
 from lakana_core.auth import PrincipalRef
 from lakana_core.errors import ValidationError
 from lakana_core.models import AuditEventFilter, AuditEventType
-from lakana_server.api.platform.listing import OrderParam, SortParam
+from lakana_core.pagination import decode_sorted_cursor, encode_sorted_cursor
+from lakana_server.api.platform.listing import OrderParam, PlaceCursorParam, SortParam
 from lakana_server.api.platform.namespace_forms import dotted_namespace
 from lakana_server.api.platform.schemas import AuditEventOut, AuditEventPage
 from lakana_server.api.responses import errors
@@ -42,6 +44,9 @@ router = APIRouter(
     tags=["audit"],
     responses=errors(401),
 )
+
+_SORTED_KIND = "audit-events"
+"""The list a cursor of the log sorted by another field than the time names."""
 
 _BAD_CURSOR = (
     "The cursor is not valid. Start the listing again without `cursor`; pass the `next_cursor` of "
@@ -61,8 +66,11 @@ def _encode_cursor(position: AuditCursor) -> str:
     -------
     str
         Unpadded base64url of `{"o": occurred_at, "i": id}`, with `"s"` the order when it is
-        not the newest first.
+        not the newest first; in a sort by another field than the time, the cursor of
+        `encode_sorted_cursor`, which holds the keys of the last event.
     """
+    if position.values:
+        return encode_sorted_cursor(_SORTED_KIND, position.sort, position.values, position.id)
     body = {"o": position.occurred_at.isoformat(), "i": str(position.id)}
     if position.sort != AUDIT_DEFAULT_SORT:
         body["s"] = position.sort
@@ -93,6 +101,15 @@ def _decode_cursor(cursor: str) -> AuditCursor:
     try:
         raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
         data = json.loads(raw)
+        if isinstance(data, dict) and data.get("k") == _SORTED_KIND:
+            sort = data.get("s")
+            if not isinstance(sort, str):
+                raise ValidationError(_BAD_CURSOR)
+            at = decode_sorted_cursor(_SORTED_KIND, sort, cursor, audit_cursor_types(sort))
+            occurred_at = at.values[-1]
+            if not isinstance(occurred_at, datetime):
+                raise ValidationError(_BAD_CURSOR)
+            return AuditCursor(occurred_at=occurred_at, id=at.id, sort=sort, values=at.values)
         if not (
             isinstance(data, dict)
             and isinstance(data.get("o"), str)
@@ -158,7 +175,7 @@ def list_audit_events(
     since: datetime | None = None,
     until: datetime | None = None,
     limit: int = Query(default=100, ge=1, le=500),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: PlaceCursorParam = None,
     sort: SortParam = None,
     order: OrderParam = None,
     p: PrincipalRef = Depends(get_principal),
@@ -203,9 +220,12 @@ def list_audit_events(
     cursor
         A previous page's `next_cursor`, to fetch the page after it.
     sort
-        What the log is sorted by: `occurred`, the only field.
+        What the log is sorted by: `occurred` (the default), `event` (the type), `who` (the
+        principal's name; an event of none last) or `on` (the environment, namespace and
+        table; an event on the whole instance first); the events of one value newest first.
     order
-        `desc` (the newest first, the default) or `asc` (the oldest first).
+        For `occurred`, `desc` (the newest first, the default) or `asc` (the oldest first);
+        `asc` by default for the others.
     p
         The acting principal.
     audit

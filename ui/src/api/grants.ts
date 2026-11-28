@@ -11,6 +11,7 @@
 import { api } from "./client";
 import { guarded } from "./stepUpFirst";
 import type { CursorPage } from "./manage";
+import { type ListSortChoice, setSort } from "./sorting";
 import type { GrantOut, ScopeOut } from "./table";
 
 /** The five roles, in the server's order. */
@@ -133,18 +134,21 @@ export function grantQuery(filter: GrantFilter): URLSearchParams {
 }
 
 /**
- * Lists one page of grants, newest first.
+ * Lists one page of grants, newest first or in a sort.
  *
  * @param filter - The filter.
  * @param cursor - The cursor of the page; null for the first.
+ * @param sort - The sort; null for the newest first.
  * @returns The page and the cursor of the next one.
  * @throws {ApiError} for a refusal, such as 404 for an unknown principal or group.
  */
 export async function listGrants(
   filter: GrantFilter,
   cursor: string | null,
+  sort: ListSortChoice | null = null,
 ): Promise<CursorPage<GrantOut>> {
   const query = grantQuery(filter);
+  setSort(query, sort);
   if (cursor !== null) {
     query.set("cursor", cursor);
   }

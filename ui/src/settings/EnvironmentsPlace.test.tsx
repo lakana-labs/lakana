@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { EnvironmentOut } from "../api/environments";
 import { areasFor } from "../shell/areas";
 import { renderShell } from "../test/render";
+import { sortBy, sortState } from "../test/sorting";
 import { type FakeRoute, whoami } from "../test/server";
 
 /** A live environment as the server answers it. */
@@ -146,6 +147,35 @@ describe("EnvironmentsPlace", () => {
       "aria-current",
       "page",
     );
+  });
+
+  it("sorts by each column, kept tables the longest retention and unread usage last", async () => {
+    const { user } = renderShell(
+      "/settings/environments",
+      asMara({
+        ...lists([DEV, PROD]),
+        "GET /api/v1/environments/dev/usage": { status: 200, body: usage() },
+      }),
+    );
+    const region = await screen.findByRole("region", { name: "Environments" });
+    await within(region).findByText("1.2 GB");
+    const column = (index: number): (string | null | undefined)[] =>
+      cells(region).map((row) => row[index]);
+
+    await sortBy(user, region, "Name");
+    await sortBy(user, region, "Name");
+    expect(column(0)).toEqual(["prod", "dev"]);
+    await sortBy(user, region, "Protection");
+    expect(sortState(region, "Protection")).toBe("ascending");
+    expect(column(0)).toEqual(["prod", "dev"]);
+    await sortBy(user, region, "Storage");
+    expect(column(0)).toEqual(["dev", "prod"]);
+    await sortBy(user, region, "Retention");
+    expect(column(0)).toEqual(["prod", "dev"]);
+    await sortBy(user, region, "Usage");
+    expect(column(4)).toEqual(["1.2 GB", "—"]);
+    await sortBy(user, region, "Usage");
+    expect(column(4)).toEqual(["1.2 GB", "—"]);
   });
 
   it("usage only where one manages", async () => {

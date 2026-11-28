@@ -5,6 +5,7 @@
  * @packageDocumentation
  */
 import { api } from "./client";
+import { type ListSortChoice, setSort } from "./sorting";
 import type { HealthSummaryOut, OwnerOut } from "./catalog";
 
 /** Where a table is: the environment, the dotted namespace and the name. */
@@ -457,11 +458,15 @@ interface GrantPage {
  * administrator may list grants.
  *
  * @param level - The object.
+ * @param sort - The sort; null for the newest first.
  * @returns The first {@link MOST_GRANTS} grants on it, newest first, and whether the server has
  *   more (it names a next page).
  * @throws {ApiError} for a refusal.
  */
-export async function listGrantsAt(level: GrantLevel): Promise<GrantPage> {
+export async function listGrantsAt(
+  level: GrantLevel,
+  sort: ListSortChoice | null = null,
+): Promise<GrantPage> {
   const query = new URLSearchParams({ environment: level.environment });
   if (level.namespace !== null) {
     query.set("namespace", level.namespace);
@@ -469,28 +474,34 @@ export async function listGrantsAt(level: GrantLevel): Promise<GrantPage> {
       query.set("table", level.table);
     }
   }
-  return firstGrants(query);
+  return firstGrants(query, sort);
 }
 
 /**
  * Lists the grants on the whole instance, which apply to every table. Only an administrator may
  * list grants.
  *
+ * @param sort - The sort; null for the newest first.
  * @returns The first {@link MOST_GRANTS} of them, newest first, and whether the server has more.
  * @throws {ApiError} for a refusal.
  */
-export async function listInstanceGrants(): Promise<GrantPage> {
-  return firstGrants(new URLSearchParams({ kind: "INSTANCE" }));
+export async function listInstanceGrants(sort: ListSortChoice | null = null): Promise<GrantPage> {
+  return firstGrants(new URLSearchParams({ kind: "INSTANCE" }), sort);
 }
 
 /**
  * Reads the first page of a grants listing.
  *
  * @param query - The listing's filters.
+ * @param sort - The sort; null for the newest first.
  * @returns The first {@link MOST_GRANTS} grants, and whether the server has more.
  */
-async function firstGrants(query: URLSearchParams): Promise<GrantPage> {
+async function firstGrants(
+  query: URLSearchParams,
+  sort: ListSortChoice | null,
+): Promise<GrantPage> {
   query.set("limit", String(MOST_GRANTS));
+  setSort(query, sort);
   const page = await api.page(`/api/v1/grants?${query.toString()}`);
   return { grants: page.body as readonly GrantOut[], more: page.nextCursor !== null };
 }

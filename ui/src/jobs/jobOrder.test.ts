@@ -52,4 +52,21 @@ describe("jobOrder", () => {
       [whole, later].sort(jobOrder({ sort: "last_run", order: "desc" })).map((j) => j.name),
     ).toEqual(["later", "whole"]);
   });
+
+  it("orders by repository and environment", () => {
+    const shop = aJob({ name: "a", repository: "Shop", environment: "prod", cron: "0 2 * * *" });
+    const books = aJob({ name: "b", repository: "books", environment: "dev", cron: null });
+    const hourly = aJob({
+      name: "c",
+      repository: "ml",
+      environment: "Dev2",
+      cron: "0 * * * *",
+      timezone: null,
+    });
+    const jobs = [shop, books, hourly];
+    const by = (sort: string, order: "asc" | "desc" = "asc"): string[] =>
+      [...jobs].sort(jobOrder({ sort, order })).map((job) => job.name);
+    expect(by("repository")).toEqual(["b", "c", "a"]);
+    expect(by("environment")).toEqual(["b", "c", "a"]);
+  });
 });

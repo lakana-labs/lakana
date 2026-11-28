@@ -1,4 +1,5 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -7,6 +8,7 @@ import type { OrphanedLocationOut, OrphanedLocationsOut } from "../api/environme
 import { initI18n } from "../i18n/i18n";
 import { freshSession, STALE_SESSION } from "../test/access";
 import { fakeServer, type FakeRoute } from "../test/server";
+import { columnTexts, sortBy, sortState } from "../test/sorting";
 import { LeftoverDirectories } from "./LeftoverDirectories";
 
 initI18n();
@@ -65,7 +67,11 @@ function renderPanel(routes: Record<string, FakeRoute>): {
   readonly user: ReturnType<typeof userEvent.setup>;
 } {
   const server = fakeServer({ [SESSION]: freshSession(), ...routes });
-  render(<LeftoverDirectories name="dev" />);
+  render(
+    <MemoryRouter>
+      <LeftoverDirectories name="dev" />
+    </MemoryRouter>,
+  );
   return { server, user: userEvent.setup() };
 }
 
@@ -107,6 +113,26 @@ describe("LeftoverDirectories", () => {
     expect(screen.getByRole("button", { name: "Find again" })).toHaveFocus();
     // Finding deletes nothing, so it asks for no touch.
     expect(sent(server)).toEqual([FIND]);
+  });
+
+  it("sorts the directories by each column, an unknown newest file last", async () => {
+    const { user } = renderPanel({ [FIND]: { status: 200, body: report(THREE) } });
+    await user.click(screen.getByRole("button", { name: "Find" }));
+    const region = await screen.findByRole("region", { name: "Leftover directories" });
+    const all = columnTexts(region);
+
+    await sortBy(user, region, "Location");
+    expect(columnTexts(region)).toEqual([...all].sort());
+    await sortBy(user, region, "Files");
+    expect(sortState(region, "Files")).toBe("descending");
+    expect(columnTexts(region, 1)).toEqual([...columnTexts(region, 1)].sort().reverse());
+    await sortBy(user, region, "Size");
+    await sortBy(user, region, "Size");
+    expect(sortState(region, "Size")).toBe("ascending");
+    await sortBy(user, region, "Newest file");
+    expect(columnTexts(region, 3).at(-1)).toBe("unknown");
+    await sortBy(user, region, "State");
+    expect(columnTexts(region, 4).at(-1)).toBe("recent, kept");
   });
 
   it("says when nothing is left over", async () => {

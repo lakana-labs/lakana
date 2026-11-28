@@ -66,8 +66,8 @@ interface UndeployNote {
 const ALL_REPOSITORIES = "all";
 
 /** The columns the deploys sort by: the newest first unless the address says otherwise. */
-const DEPLOY_SORTS: ListSortSpec<"status" | "created"> = {
-  fields: { status: "asc", created: "desc" },
+const DEPLOY_SORTS: ListSortSpec<"status" | "kind" | "repository" | "who" | "created"> = {
+  fields: { status: "asc", kind: "asc", repository: "asc", who: "asc", created: "desc" },
   natural: { field: "created", order: "desc" },
 };
 
@@ -259,10 +259,13 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
             <SortHeader {...sorting.header("status")}>
               {t("jobs.deploys.columns.result")}
             </SortHeader>
-            <th scope="col">{t("jobs.deploys.columns.kind")}</th>
+            <SortHeader {...sorting.header("kind")}>{t("jobs.deploys.columns.kind")}</SortHeader>
+            {/* A commit's hash is a random number, with no order that means something. */}
             <th scope="col">{t("jobs.deploys.columns.commit")}</th>
-            <th scope="col">{t("jobs.deploys.columns.repository")}</th>
-            <th scope="col">{t("jobs.deploys.columns.who")}</th>
+            <SortHeader {...sorting.header("repository")}>
+              {t("jobs.deploys.columns.repository")}
+            </SortHeader>
+            <SortHeader {...sorting.header("who")}>{t("jobs.deploys.columns.who")}</SortHeader>
             <SortHeader {...sorting.header("created")}>{t("jobs.deploys.columns.when")}</SortHeader>
             <th scope="col">
               <span className="visually-hidden">{t("jobs.deploys.columns.actions")}</span>

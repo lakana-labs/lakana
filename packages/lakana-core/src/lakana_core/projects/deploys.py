@@ -116,7 +116,9 @@ from lakana_core.pagination import (
     SortKey,
     decode_cursor,
     encode_cursor,
-    page_in_order,
+    last_if_missing,
+    name_order,
+    page_sorted_in_python,
     parse_sort,
     sorted_page,
 )
@@ -1025,6 +1027,41 @@ class OrphanView:
     actions: tuple[str, ...] = ()
 
 
+ORPHAN_SORTS: dict[str, bool] = {"repository": False, "name": False, "kind": False}
+"""The fields the orphans sort by, all from A: by repository (the default, then the table),
+by the table's name (then its namespace and repository) or by its kind."""
+
+
+def _orphan_name(orphan: OrphanView) -> tuple[str, str]:
+    """Split an orphan's dotted table into its name and namespace, in any letter case.
+
+    Parameters
+    ----------
+    orphan
+        The orphan.
+
+    Returns
+    -------
+    tuple of str
+        The table's name, then its namespace.
+    """
+    namespace, _, name = orphan.table.rpartition(".")
+    return name.lower(), namespace.lower()
+
+
+_ORPHAN_KEYS: dict[str, Callable[[OrphanView, bool], tuple[str, ...]]] = {
+    "repository": lambda o, _down: (o.repository, o.table),
+    "name": lambda o, _down: (*_orphan_name(o), o.repository, o.table),
+    "kind": lambda o, down: (
+        *last_if_missing(o.kind, down),
+        *_orphan_name(o),
+        o.repository,
+        o.table,
+    ),
+}
+"""How each field of the orphans keys one; the repository and the dotted table keep it unique."""
+
+
 @dataclass(frozen=True)
 class OrphanReport:
     """Orphans visible to the reader.
@@ -1052,21 +1089,46 @@ class DeploymentMoved(ConflictError):
     """
 
 
-DEPLOY_SORTS: dict[str, bool] = {"created": True, "status": False}
+DEPLOY_SORTS: dict[str, bool] = {
+    "created": True,
+    "status": False,
+    "kind": False,
+    "repository": False,
+    "who": False,
+}
 """The fields the deploys lists sort by, each with whether it runs from the largest down by
-default: the newest first, states from A."""
+default: the newest first, states, kinds and names from A."""
 
-_DEPLOY_STATUS_FIELD = SortField(
-    (
-        SortKey(type_coerce(DeployRun.status, String), str),
-        SortKey(DeployRun.created_at, datetime, descending=True),
-    ),
-    descending=False,
-)
-"""Deploys by their stored state, those of one state the newest first."""
 
-_DEPLOY_CREATED_FIELD = SortField((SortKey(DeployRun.created_at, datetime),), descending=True)
-"""Deploys by when they were asked for."""
+def _deploy_sort_field(session: Session, field: str) -> SortField:
+    """Give the keys of a field of the deploys lists.
+
+    Parameters
+    ----------
+    session
+        The session the list is read in, for the way its database compares names.
+    field
+        A key of `DEPLOY_SORTS`.
+
+    Returns
+    -------
+    SortField
+        For ``created``, when the deploy was asked for. For ``status`` and ``kind``, the
+        stored word; for ``repository``, its name; for ``who``, the name of whoever asked
+        (a deploy whose submitter was deleted last); each then the newest first.
+    """
+    if field == "created":
+        return SortField((SortKey(DeployRun.created_at, datetime),), descending=True)
+    repository = select(Repository.name).where(Repository.id == DeployRun.repository_id)
+    key = {
+        "status": SortKey(type_coerce(DeployRun.status, String), str),
+        "kind": SortKey(type_coerce(DeployRun.kind, String), str),
+        "repository": SortKey(name_order(session, repository.scalar_subquery()), str),
+        "who": SortKey(name_order(session, Principal.name), str, nullable=True),
+    }[field]
+    return SortField(
+        (key, SortKey(DeployRun.created_at, datetime, descending=True)), descending=False
+    )
 
 
 class DeployService:
@@ -2630,13 +2692,12 @@ class DeployService:
         if repository is not None:
             query = query.where(DeployRun.repository_id == self._repository(repository).id)
         if sort != ("created", True):
-            field = _DEPLOY_STATUS_FIELD if sort.field == "status" else _DEPLOY_CREATED_FIELD
             found = sorted_page(
                 self._session,
                 query,
                 kind=kind,
                 sort=sort,
-                field=field,
+                field=_deploy_sort_field(self._session, sort.field),
                 row_id=DeployRun.id,
                 limit=limit,
                 cursor=cursor,
@@ -3298,6 +3359,8 @@ class DeployService:
         *,
         limit: int = LIST_LIMIT_DEFAULT,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> OrphanReport:
         """Compute tables earlier project versions produced that no current one does.
 
@@ -3315,14 +3378,19 @@ class DeployService:
         limit
             Most orphans returned (1 to `LIST_LIMIT_MAX`).
         cursor
-            The `next_cursor` of the previous page.
+            The `next_cursor` of the previous page; send the same sort with every page.
+        sort
+            What the list is sorted by: ``repository`` (the default), ``name`` (the table's
+            name in any letter case) or ``kind`` (an orphan of no known kind last).
+        order
+            ``asc`` or ``desc``; ``asc`` by default.
 
         Returns
         -------
         OrphanReport
-            One page of the readable orphans, sorted by repository and table, and a count of
-            hidden ones (all pages). A table that was dropped and can still be restored is
-            listed with `exists=False`.
+            One page of the readable orphans, sorted by repository and table (or in the sort
+            asked for), and a count of hidden ones (all pages). A table that was dropped and
+            can still be restored is listed with `exists=False`.
 
         Raises
         ------
@@ -3331,9 +3399,11 @@ class DeployService:
         NotFoundError
             If the environment does not exist.
         ValidationError
-            If `limit` is out of range, or `cursor` is not one this list issued.
+            If `limit` is out of range, `sort` or `order` is unknown, or `cursor` is not one
+            this list issued in this sort.
         """
         env = self._authorize_read(p, environment)
+        chosen = parse_sort(sort, order, ORPHAN_SORTS, "repository")
         restorable: dict[tuple[tuple[str, ...], str], DroppedTable] | None = None
         orphans: list[OrphanView] = []
         hidden = 0
@@ -3400,10 +3470,12 @@ class DeployService:
                     )
                 else:
                     hidden += 1
-        page = page_in_order(
+        page = page_sorted_in_python(
             orphans,
             kind="orphans",
-            key_of=lambda o: (o.repository, o.table),
+            sort=chosen,
+            default=ListSort("repository", descending=False),
+            keys=_ORPHAN_KEYS,
             limit=limit,
             cursor=cursor,
         )

@@ -23,7 +23,16 @@ import { PendingButton } from "../shell/PendingButton";
 import { markedText, VisibleText } from "../shell/VisibleText";
 import { SettingsFrame } from "../settings/SettingsFrame";
 import "../settings/settingsStrings";
+import { type ListSortSpec, sortRows } from "../shell/listSort";
+import { useListSort } from "../shell/useListSort";
 import "../settings/signInStrings";
+
+/** The columns the open recovery links sort by, in the browser: the list is read whole. */
+const RECOVERY_SORT: ListSortSpec<"name" | "expires"> = {
+  fields: { name: "asc", expires: "asc" },
+  natural: null,
+  param: "recovery",
+};
 
 /**
  * Renders the open recovery links in their own scrolling region, names kept whole; each row opens
@@ -34,6 +43,7 @@ import "../settings/signInStrings";
 export function RecoveryLinksPage(): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
+  const sorting = useListSort(RECOVERY_SORT);
   const links = useResource(listRecoveryLinks);
   const withdraw = useAttempt();
   const [pressed, setPressed] = useState<string | null>(null);
@@ -77,9 +87,13 @@ export function RecoveryLinksPage(): JSX.Element {
                 <ListHead
                   columns={[t("list.name"), t("list.expires")]}
                   hidden={[t("list.actions"), t("list.open")]}
+                  sorts={{ by: ["name", "expires"], sorting }}
                 />
                 <tbody>
-                  {open.map((link) => (
+                  {sortRows(open, sorting.sort, {
+                    name: (link) => link.name,
+                    expires: (link) => link.expires_at,
+                  }).map((link) => (
                     <tr key={link.id}>
                       <td>
                         <Link className="row-name" to={personPath(link.name)}>

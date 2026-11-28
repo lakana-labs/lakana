@@ -19,6 +19,7 @@ import {
 } from "../test/connections";
 import { held } from "../test/pending";
 import { fakeServer, type FakeRoute } from "../test/server";
+import { expectServerSorts } from "../test/sorting";
 import { MeContext } from "../shell/me";
 import { ConnectionList } from "./ConnectionList";
 import { STUCK_AFTER_MS } from "./useOpenTests";
@@ -162,7 +163,9 @@ describe("ConnectionList", () => {
 
     expect(await screen.findByText("2 connections")).toHaveClass("toolbar-count");
     const end = document.querySelector(".list-toolbar .toolbar-end");
-    expect(end).toContainElement(screen.getByRole("button", { name: /Environment/ }));
+    expect(end).toContainElement(
+      screen.getByRole("button", { name: /Environment/, expanded: false }),
+    );
     const reads = server.sent.filter((sent) => sent.path.includes("/connections")).length;
 
     await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
@@ -1081,5 +1084,18 @@ describe("ConnectionList's sort", () => {
     await waitFor(() => {
       expect(server.sent.at(-1)?.path).toContain("sort=name&order=asc");
     });
+  });
+
+  it("sorts by kind and environment on the server; where and used by do not sort", async () => {
+    const server = fakeServer(connectionRoutes([aConnection()], MANAGER));
+    renderList();
+    await screen.findByRole("link", { name: aConnection().name });
+    const user = userEvent.setup();
+    const table = (): HTMLElement => screen.getByRole("table");
+    expect(within(table()).queryByRole("button", { name: "Where" })).toBeNull();
+    await expectServerSorts(user, table, server.sent, "/api/v1/", [
+      ["Kind", "sort=kind&order=asc"],
+      ["Environment", "sort=environment&order=asc"],
+    ]);
   });
 });

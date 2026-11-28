@@ -1,7 +1,10 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
 import { aFailure, anAttempt } from "../test/jobs";
+import { columnTexts, sortBy, sortState } from "../test/sorting";
 import { Attempts } from "./Attempts";
 
 /**
@@ -31,6 +34,7 @@ describe("Attempts", () => {
           anAttempt({ attempt: 3, outcome: "evicted" }),
         ]}
       />,
+      { wrapper: MemoryRouter },
     );
 
     const region = screen.getByRole("region", { name: "Attempts of silver.U+202Eorders" });
@@ -71,6 +75,39 @@ describe("Attempts", () => {
     expect(cells(2)[4]).toHaveTextContent("evicted");
   });
 
+  it("sorts the attempts by every column", async () => {
+    const user = userEvent.setup();
+    render(
+      <Attempts
+        asset="silver.orders"
+        attempts={[
+          anAttempt({ outcome: "failed", worker: "w-2", failure: aFailure("memory_spike") }),
+          anAttempt({ attempt: 2, outcome: "timed_out", worker: "w-1" }),
+          anAttempt({ attempt: 3, outcome: null, finished_at: null, worker: "w-3" }),
+        ]}
+      />,
+      { wrapper: MemoryRouter },
+    );
+    const region = screen.getByRole("region", { name: "Attempts of silver.orders" });
+    const columns = within(region)
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent);
+
+    for (const column of columns) {
+      await sortBy(user, region, column);
+      expect(sortState(region, column)).not.toBeNull();
+    }
+    await sortBy(user, region, "Worker");
+    expect(columnTexts(region, 1)).toEqual(["w-1", "w-2", "w-3"]);
+    await sortBy(user, region, "Attempt");
+    expect(columnTexts(region)).toEqual(["1", "2", "3"]);
+    // A running attempt has no duration yet: it comes last either way.
+    await sortBy(user, region, "Duration");
+    expect(columnTexts(region, 1)[2]).toBe("w-3");
+    await sortBy(user, region, "Duration");
+    expect(columnTexts(region, 1)[2]).toBe("w-3");
+  });
+
   it("an unmeasured figure shows a dash for the eye and words for a screen reader, never zero", () => {
     render(
       <Attempts
@@ -86,6 +123,7 @@ describe("Attempts", () => {
           }),
         ]}
       />,
+      { wrapper: MemoryRouter },
     );
 
     const row = cells(0);
@@ -114,6 +152,7 @@ describe("Attempts", () => {
           anAttempt({ rows_written: 0, peak_memory_bytes: 0, cpu_seconds: 0, bytes_read: 0 }),
         ]}
       />,
+      { wrapper: MemoryRouter },
     );
 
     const row = cells(0);
@@ -126,7 +165,7 @@ describe("Attempts", () => {
   });
 
   it("says when the task has no attempt yet", () => {
-    render(<Attempts asset="silver.orders" attempts={[]} />);
+    render(<Attempts asset="silver.orders" attempts={[]} />, { wrapper: MemoryRouter });
 
     expect(screen.getByText("No attempt yet.")).toBeInTheDocument();
     expect(screen.queryByRole("table")).toBeNull();
@@ -138,7 +177,9 @@ describe("Attempts", () => {
       anAttempt({ outcome: "released", finished_at: "2026-11-17T01:00:06Z", rows_written: null }),
       anAttempt({ started_at: "2026-11-17T01:00:10Z", worker: "w-9b2c" }),
     ];
-    const { rerender } = render(<Attempts asset="silver.orders" attempts={attempts} />);
+    const { rerender } = render(<Attempts asset="silver.orders" attempts={attempts} />, {
+      wrapper: MemoryRouter,
+    });
     rerender(<Attempts asset="silver.orders" attempts={[...attempts].reverse()} />);
 
     expect(cells(0)[1]).toHaveTextContent("w-9b2c");

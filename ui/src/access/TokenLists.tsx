@@ -23,6 +23,9 @@ import { ViewList } from "../catalog/views/ViewList";
 import { jobRunPath } from "../jobs/paths";
 import { Avatar } from "../profile/Avatar";
 import type { ListState } from "../shell/ListToolbar";
+import type { ListSortSpec } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { type ListSortState, useListSort } from "../shell/useListSort";
 import { ConfirmDialog } from "../shell/ConfirmDialog";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import { useWhen } from "../shell/useWhen";
@@ -51,21 +54,43 @@ function useFocusOnRead(heading: RefObject<HTMLHeadingElement | null>, items: un
   }, []);
 }
 
+/** The columns everyone's tokens sort by, on the server; their own order is the newest first. */
+const PERSONAL_SORTS: ListSortSpec<"owner" | "name" | "created" | "last_used" | "expires"> = {
+  fields: { owner: "asc", name: "asc", created: "desc", last_used: "desc", expires: "asc" },
+  natural: { field: "created", order: "desc" },
+  param: "tokens",
+};
+
+/** The columns the task tokens sort by, on the server; their own order is the newest first. */
+const TASK_SORTS: ListSortSpec<"environment" | "purpose" | "acts_as" | "issued" | "expires"> = {
+  fields: { environment: "asc", purpose: "asc", acts_as: "asc", issued: "desc", expires: "asc" },
+  natural: { field: "issued", order: "desc" },
+  param: "taskTokens",
+};
+
 /**
- * A list's header row: the columns, then the unnamed column of Revoke.
+ * A list's header row: the columns, each sorting the list, then the unnamed column of Revoke.
  *
- * @param props - The columns.
- * @param props.columns - The columns' names, in order.
+ * @template F - The fields the list sorts by.
+ * @param props - The columns and the sort.
+ * @param props.columns - Each column's name and its field, in order.
+ * @param props.sorting - The list's sort.
  * @returns The row.
  */
-function HeadRow({ columns }: { readonly columns: readonly string[] }): JSX.Element {
+function HeadRow<F extends string>({
+  columns,
+  sorting,
+}: {
+  readonly columns: readonly (readonly [string, F])[];
+  readonly sorting: ListSortState<F>;
+}): JSX.Element {
   const { t } = useTranslation();
   return (
     <tr>
-      {columns.map((column) => (
-        <th scope="col" key={column}>
+      {columns.map(([column, field]) => (
+        <SortHeader key={column} {...sorting.header(field)}>
           {column}
-        </th>
+        </SortHeader>
       ))}
       <th scope="col">
         <span className="visually-hidden">{t("list.actions")}</span>
@@ -196,8 +221,15 @@ export function PersonalTokens({
 }: PersonalTokensProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
-  const load = useCallback((cursor: string | null) => listAllTokens(owner, cursor), [owner]);
-  const pages = useCursorPages(owner ?? "", load);
+  const sorting = useListSort(PERSONAL_SORTS);
+  const sort = sorting.choice;
+  const load = useCallback(
+    (cursor: string | null) => listAllTokens(owner, cursor, sort),
+    [owner, sort],
+  );
+  // A new sort reads the first page again; the rows stay until it arrives. A token used while
+  // the list is paged by Last used is shown once.
+  const pages = useCursorPages(owner ?? "", load, JSON.stringify(sort), (token) => token.key_id);
   useReloadOn(round, pages.reload);
   const arm = useFocusOnRead(heading, pages.items);
   const [revoking, setRevoking] = useState<TokenOut | null>(null);
@@ -221,12 +253,13 @@ export function PersonalTokens({
         head={
           <HeadRow
             columns={[
-              t("tokens.owner"),
-              t("tokens.name"),
-              t("tokens.created"),
-              t("tokens.lastUsed"),
-              t("tokens.expires"),
+              [t("tokens.owner"), "owner"],
+              [t("tokens.name"), "name"],
+              [t("tokens.created"), "created"],
+              [t("tokens.lastUsed"), "last_used"],
+              [t("tokens.expires"), "expires"],
             ]}
+            sorting={sorting}
           />
         }
       >
@@ -351,11 +384,14 @@ export interface TaskTokensProps {
 export function TaskTokens({ environment, heading, onState, round }: TaskTokensProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
+  const sorting = useListSort(TASK_SORTS);
+  const sort = sorting.choice;
   const load = useCallback(
-    (cursor: string | null) => listTaskTokens(environment, cursor),
-    [environment],
+    (cursor: string | null) => listTaskTokens(environment, cursor, sort),
+    [environment, sort],
   );
-  const pages = useCursorPages(environment ?? "", load);
+  // A new sort reads the first page again; the rows stay until it arrives.
+  const pages = useCursorPages(environment ?? "", load, JSON.stringify(sort));
   useReloadOn(round, pages.reload);
   const arm = useFocusOnRead(heading, pages.items);
   const [revoking, setRevoking] = useState<TaskTokenOut | null>(null);
@@ -380,12 +416,13 @@ export function TaskTokens({ environment, heading, onState, round }: TaskTokensP
         head={
           <HeadRow
             columns={[
-              t("tokens.task.environment"),
-              t("tokens.task.for"),
-              t("tokens.task.principal"),
-              t("tokens.task.issued"),
-              t("tokens.expires"),
+              [t("tokens.task.environment"), "environment"],
+              [t("tokens.task.for"), "purpose"],
+              [t("tokens.task.principal"), "acts_as"],
+              [t("tokens.task.issued"), "issued"],
+              [t("tokens.expires"), "expires"],
             ]}
+            sorting={sorting}
           />
         }
       >

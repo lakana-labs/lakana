@@ -12,7 +12,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -312,9 +312,17 @@ class JobView:
     paused_at: datetime | None = None
 
 
-JOB_SORTS: dict[str, bool] = {"name": False, "status": False, "last_run": True, "next_run": False}
+JOB_SORTS: dict[str, bool] = {
+    "name": False,
+    "status": False,
+    "last_run": True,
+    "next_run": False,
+    "repository": False,
+    "environment": False,
+}
 """The fields the jobs list sorts by, each with whether it runs from the largest down by default:
-names and the last run's state from A, the latest last run first, the soonest next run first."""
+names, repositories, environments and the last run's state from A, the latest last
+run first, the soonest next run first."""
 
 
 def sorted_jobs(views: Sequence[JobView], sort: str | None, order: str | None) -> Sequence[JobView]:
@@ -328,8 +336,10 @@ def sorted_jobs(views: Sequence[JobView], sort: str | None, order: str | None) -
     views
         The jobs, in the list's own order.
     sort
-        ``name``, ``status`` (the last run's state), ``last_run`` or ``next_run``; with `order`
-        also `None`, the list's own order: by repository, then name.
+        ``name``, ``status`` (the last run's state), ``last_run``, ``next_run``,
+        ``repository`` or ``environment``; with `order` also `None`, the list's own order: by
+        repository, then name. A schedule does not sort: cron text has no order that means
+        something.
     order
         ``asc`` or ``desc``; by default ``desc`` for ``last_run``, ``asc`` for the others.
 
@@ -349,15 +359,19 @@ def sorted_jobs(views: Sequence[JobView], sort: str | None, order: str | None) -
     ties = sorted(views, key=lambda v: (v.name.casefold(), v.name, v.repository))
     if chosen.field == "name":
         return sorted(ties, key=lambda v: v.name.casefold(), reverse=chosen.descending)
-    value_of = {
+    value_of: Callable[[JobView], object] = {
         "status": lambda v: v.last_run_status,
         "last_run": lambda v: v.last_run_at,
         "next_run": lambda v: v.next_run_at,
+        "repository": lambda v: v.repository.casefold(),
+        "environment": lambda v: v.environment.casefold(),
     }[chosen.field]
     known = [v for v in ties if value_of(v) is not None]
     unknown = [v for v in ties if value_of(v) is None]
     # A sort is stable, also in reverse: equal values keep the order of `ties`.
-    return [*sorted(known, key=value_of, reverse=chosen.descending), *unknown]
+    # The values of one field are of one type, which compares: names or times.
+    by_value = cast("Callable[[JobView], str]", value_of)
+    return [*sorted(known, key=by_value, reverse=chosen.descending), *unknown]
 
 
 PROBLEM_NONE = "none"

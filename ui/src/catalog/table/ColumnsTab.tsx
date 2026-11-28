@@ -15,6 +15,9 @@ import { Unknown } from "../cells";
 import { splitDotted, tablePath } from "../paths";
 import { editLanguage, languageName } from "./language";
 import { useTableData } from "./TableContext";
+import { type ListSortSpec, sortRows } from "../../shell/listSort";
+import { SortHeader } from "../../shell/SortHeader";
+import { useListSort } from "../../shell/useListSort";
 import { BackToGit, TextEditor, useDescribe, useReturnFocus } from "./TextEditor";
 
 /**
@@ -46,6 +49,15 @@ export function columnJoins(table: TableOut, column: string): readonly ModelRefe
 
 /** The number of cells in a row of the full table that can be edited. */
 const COLUMNS_WITH_ACTIONS = 8;
+
+/** The columns of the Columns tab's list that sort. */
+type ColumnField = "name" | "type" | "nulls" | "role" | "joins" | "terms";
+
+/** How the Columns tab sorts, in the browser; without a sort, the table's own column order. */
+const COLUMN_SORT: ListSortSpec<ColumnField> = {
+  fields: { name: "asc", type: "asc", nulls: "asc", role: "asc", joins: "asc", terms: "asc" },
+  natural: null,
+};
 
 /** Properties of {@link ColumnsTable}. */
 export interface ColumnsTableProps {
@@ -223,19 +235,29 @@ function ColumnRow({ column, full, editing, blocked, onEditing }: ColumnRowProps
  */
 export function ColumnsTable({ columns, full }: ColumnsTableProps): JSX.Element {
   const { t } = useTranslation();
-  const { mayEdit } = useTableData();
+  const { table, mayEdit } = useTableData();
   const [editing, setEditing] = useState<string | null>(null);
+  // Overview's first columns keep the table's own order: it is a glimpse, Columns sorts.
+  const sorting = useListSort(COLUMN_SORT);
+  const sort = full ? sorting.sort : { field: null, order: "asc" as const };
+  const head = (field: ColumnField, words: string): JSX.Element =>
+    full ? (
+      <SortHeader {...sorting.header(field)}>{words}</SortHeader>
+    ) : (
+      <th scope="col">{words}</th>
+    );
   return (
     <table className="list columns-table">
       <thead>
         <tr>
-          <th scope="col">{t("table.columns.name")}</th>
-          <th scope="col">{t("table.columns.type")}</th>
-          {full && <th scope="col">{t("table.columns.nulls")}</th>}
-          {full && <th scope="col">{t("table.columns.role")}</th>}
-          {full && <th scope="col">{t("table.columns.joins")}</th>}
+          {head("name", t("table.columns.name"))}
+          {head("type", t("table.columns.type"))}
+          {full && head("nulls", t("table.columns.nulls"))}
+          {full && head("role", t("table.columns.role"))}
+          {full && head("joins", t("table.columns.joins"))}
+          {/* A description is free text, with no order that means something. */}
           <th scope="col">{t("table.columns.description")}</th>
-          {full && <th scope="col">{t("table.columns.terms")}</th>}
+          {full && head("terms", t("table.columns.terms"))}
           {full && mayEdit && (
             <th scope="col">
               <span className="visually-hidden">{t("table.columns.actions")}</span>
@@ -244,7 +266,22 @@ export function ColumnsTable({ columns, full }: ColumnsTableProps): JSX.Element 
         </tr>
       </thead>
       <tbody>
-        {columns.map((column) => (
+        {sortRows(columns, sort, {
+          name: (column) => column.name,
+          type: (column) => column.type,
+          // Required first going up.
+          nulls: (column) => (column.nullable ? 1 : 0),
+          role: (column) => {
+            const role = columnRole(table, column.name);
+            return role === null ? null : t(`table.columns.roles.${role}`);
+          },
+          joins: (column) => {
+            const join = columnJoins(table, column.name)[0];
+            return join === undefined ? null : `${join.target}.${join.target_column}`;
+          },
+          terms: (column) =>
+            column.terms.length === 0 ? null : column.terms.map((term) => term.name).join(", "),
+        }).map((column) => (
           <ColumnRow
             key={column.name}
             column={column}

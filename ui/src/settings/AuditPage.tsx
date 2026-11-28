@@ -44,8 +44,8 @@ import "./settingsStrings";
 const EXPORT_URL = `${DOCS_URL}how-to/export-and-keep-the-audit-log/`;
 
 /** The one column the log sorts by: when, the newest first unless the address says otherwise. */
-const AUDIT_SORTS: ListSortSpec<"occurred"> = {
-  fields: { occurred: "desc" },
+const AUDIT_SORTS: ListSortSpec<"occurred" | "event" | "who" | "on"> = {
+  fields: { occurred: "desc", event: "asc", who: "asc", on: "asc" },
   natural: { field: "occurred", order: "desc" },
 };
 
@@ -523,9 +523,10 @@ export function AuditPage(): JSX.Element {
         head={
           <tr>
             <SortHeader {...sorting.header("occurred")}>{t("settings.audit.when")}</SortHeader>
-            <th scope="col">{t("settings.audit.event")}</th>
-            <th scope="col">{t("settings.audit.who")}</th>
-            <th scope="col">{t("settings.audit.on")}</th>
+            <SortHeader {...sorting.header("event")}>{t("settings.audit.event")}</SortHeader>
+            <SortHeader {...sorting.header("who")}>{t("settings.audit.who")}</SortHeader>
+            <SortHeader {...sorting.header("on")}>{t("settings.audit.on")}</SortHeader>
+            {/* The details are what each kind of event records, with no one order. */}
             <th scope="col">{t("settings.audit.details")}</th>
           </tr>
         }

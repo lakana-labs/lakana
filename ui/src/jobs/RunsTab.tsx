@@ -33,8 +33,18 @@ interface RunsPage extends CursorPage<RunOut> {
 }
 
 /** The columns the Runs tab sorts by: the newest first unless the address says otherwise. */
-const RUN_SORTS: ListSortSpec<"status" | "name" | "created"> = {
-  fields: { status: "asc", name: "asc", created: "desc" },
+const RUN_SORTS: ListSortSpec<
+  "status" | "name" | "environment" | "trigger" | "created" | "duration" | "tasks"
+> = {
+  fields: {
+    status: "asc",
+    name: "asc",
+    environment: "asc",
+    trigger: "asc",
+    created: "desc",
+    duration: "desc",
+    tasks: "desc",
+  },
   natural: { field: "created", order: "desc" },
 };
 
@@ -239,15 +249,21 @@ function RunsList({ environments }: RunsListProps): JSX.Element {
                 {t("jobs.runsTab.columns.state")}
               </SortHeader>
               <SortHeader {...sorting.header("name")}>{t("jobs.runsTab.columns.run")}</SortHeader>
-              <th scope="col">{t("jobs.runsTab.columns.environment")}</th>
-              <th scope="col">{t("jobs.runsTab.columns.startedBy")}</th>
+              <SortHeader {...sorting.header("environment")}>
+                {t("jobs.runsTab.columns.environment")}
+              </SortHeader>
+              <SortHeader {...sorting.header("trigger")}>
+                {t("jobs.runsTab.columns.startedBy")}
+              </SortHeader>
               <SortHeader {...sorting.header("created")}>
                 {t("jobs.runsTab.columns.created")}
               </SortHeader>
-              <th scope="col" className="number">
+              <SortHeader {...sorting.header("duration")} className="number">
                 {t("jobs.runsTab.columns.duration")}
-              </th>
-              <th scope="col">{t("jobs.runsTab.columns.tasks")}</th>
+              </SortHeader>
+              <SortHeader {...sorting.header("tasks")}>
+                {t("jobs.runsTab.columns.tasks")}
+              </SortHeader>
               <th scope="col">
                 <span className="visually-hidden">{t("list.open")}</span>
               </th>

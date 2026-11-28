@@ -26,7 +26,12 @@ from lakana_core.runs.waiting import WaitReason
 from lakana_core.secrets.keys import KeyProvider
 from lakana_core.storage.base import Storage
 from lakana_core.storage.resolver import StorageResolver
-from lakana_server.api.platform.listing import set_next_cursor, split_values
+from lakana_server.api.platform.listing import (
+    OrderParam,
+    SortParam,
+    set_next_cursor,
+    split_values,
+)
 from lakana_server.api.platform.schemas import (
     QueryEnvironmentOut,
     QueryListOut,
@@ -138,6 +143,8 @@ def list_queries(
     since: datetime | None = None,
     limit: int = Query(default=100, ge=1, le=QUERY_LIST_MAX),
     cursor: str | None = Query(default=None, max_length=512),
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     queries: QueryService = Depends(get_query_service),
 ) -> list[QueryListOut]:
@@ -149,7 +156,8 @@ def list_queries(
     they submitted. The list never shows SQL text, error messages or results. The cursor of
     the next page is in the `X-Next-Cursor` response header and is absent on the last page;
     send the same filters with every page. Answers 404 when the environment does not exist,
-    and 422 for an unknown status or origin or a `since` without a time zone. Answers 503
+    and 422 for an unknown status or origin, a `since` without a time zone, an unknown `sort`
+    or `order`, or a cursor of another order. Answers 503
     when a manager's page shows someone else's queries and the audit entry for that could not
     be written; nothing is listed then.
 
@@ -179,6 +187,11 @@ def list_queries(
         Most rows returned (1 to 200).
     cursor
         The `X-Next-Cursor` of the previous page.
+    sort
+        `created` (when submitted) or `status`, in one order for every state; without `sort`
+        and `order`, the list's own order.
+    order
+        `asc` or `desc`; by default `desc` for `created`, `asc` for `status`.
     principal
         The authenticated caller.
     queries
@@ -211,6 +224,8 @@ def list_queries(
         since=since,
         limit=limit,
         cursor=cursor,
+        sort=sort,
+        order=order,
     )
     set_next_cursor(response, next_cursor)
     return [_list_out(item) for item in items]
@@ -258,6 +273,8 @@ def list_all_queries(
     since: datetime | None = None,
     limit: int = Query(default=100, ge=1, le=QUERY_LIST_MAX),
     cursor: str | None = Query(default=None, max_length=512),
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     queries: QueryService = Depends(get_query_service),
 ) -> QueryListPageOut:
@@ -295,6 +312,10 @@ def list_all_queries(
         Most rows returned (1 to 200).
     cursor
         The `next_cursor` of the previous page.
+    sort
+        What the list is sorted by, with the fields of the list of one environment.
+    order
+        `asc` or `desc`, each field's way by default, as on the list of one environment.
     principal
         The authenticated caller.
     queries
@@ -326,6 +347,8 @@ def list_all_queries(
         since=since,
         limit=limit,
         cursor=cursor,
+        sort=sort,
+        order=order,
     )
     return QueryListPageOut(items=[_list_out(item) for item in items], next_cursor=next_cursor)
 

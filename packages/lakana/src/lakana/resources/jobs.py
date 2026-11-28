@@ -177,9 +177,9 @@ class Jobs:
         repository
             Only this repository's jobs.
         sort
-            What the jobs are sorted by: ``name``, ``status`` (the last run's), ``last_run`` or
-            ``next_run``; a job without a value comes last. Without it (and `order`), by
-            repository, then name.
+            What the jobs are sorted by: ``name``, ``status`` (the last run's), ``last_run``,
+            ``next_run``, ``repository`` or ``environment``; a job without a value comes
+            last. Without it (and `order`), by repository, then name.
         order
             ``asc`` or ``desc``; by default ``desc`` for ``last_run``, ``asc`` for the others.
 

@@ -25,6 +25,9 @@ import { useFocusAfter } from "../shell/useFocusAfter";
 import { useResource } from "../shell/useResource";
 import { VisibleText } from "../shell/VisibleText";
 import { useAttempt } from "../sign-in/Attempt";
+import { type ListSortSpec, sortRows } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import "./environmentPageStrings";
 
 const P = "settings.environmentPage.runAs";
@@ -122,6 +125,13 @@ export interface RunAsPanelProps {
 /** What is open: a deployment's dialog to set, or to clear. */
 type Open = { readonly kind: "set" | "clear"; readonly deployment: DeploymentOut };
 
+/** The columns the deployments sort by, in the browser: they are read whole. */
+const RUN_AS_SORT: ListSortSpec<"repository" | "runsAs"> = {
+  fields: { repository: "asc", runsAs: "asc" },
+  natural: null,
+  param: "runAs",
+};
+
 /**
  * Renders the deployments in their own scrolling region, each with who its runs write as (or
  * what an unbound one does here), and for a manager its buttons. After a change the list is
@@ -142,6 +152,7 @@ export function RunAsPanel({ environment, isProtected, manages }: RunAsPanelProp
   const [focusOn, setFocusOn] = useState<string | null>(null);
   const [open, setOpen] = useState<Open | null>(null);
   const [note, setNote] = useState("");
+  const sorting = useListSort(RUN_AS_SORT);
   const rows = read.data;
   const changed = (repository: string, sentence: string): void => {
     setOpen(null);
@@ -187,9 +198,10 @@ export function RunAsPanel({ environment, isProtected, manages }: RunAsPanelProp
           <table className="list">
             <thead>
               <tr>
-                <th scope="col">{t(`${P}.repository`)}</th>
+                <SortHeader {...sorting.header("repository")}>{t(`${P}.repository`)}</SortHeader>
+                {/* A commit's hash has no order that means something. */}
                 <th scope="col">{t(`${P}.commit`)}</th>
-                <th scope="col">{t(`${P}.runsAs`)}</th>
+                <SortHeader {...sorting.header("runsAs")}>{t(`${P}.runsAs`)}</SortHeader>
                 {manages && (
                   <th scope="col">
                     <span className="visually-hidden">{t("list.actions")}</span>
@@ -198,7 +210,11 @@ export function RunAsPanel({ environment, isProtected, manages }: RunAsPanelProp
               </tr>
             </thead>
             <tbody>
-              {rows.map((deployment) => {
+              {sortRows(rows, sorting.sort, {
+                repository: (deployment) => deployment.repository,
+                // One without a run-as account sorts last.
+                runsAs: (deployment) => deployment.run_as,
+              }).map((deployment) => {
                 const { repository } = deployment;
                 const ref = focusOn === repository ? after : undefined;
                 return (

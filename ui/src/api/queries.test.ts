@@ -62,7 +62,7 @@ describe("queries api", () => {
   it("asks for my written queries of 30 days across environments, newest first", async () => {
     const server = fakeServer(queryRoutes());
 
-    const page = await listMyQueries("kim.lee", null, null, NOW);
+    const page = await listMyQueries("kim.lee", null, null, null, NOW);
 
     expect(page).toEqual({ items: [aListedRun()], nextCursor: null });
     expect(server.sent[0]?.path).toBe(
@@ -74,7 +74,7 @@ describe("queries api", () => {
   it("adds environment and cursor only when set", async () => {
     const server = fakeServer(queryRoutes());
 
-    await listMyQueries("kim lee", "dev", "c1", NOW);
+    await listMyQueries("kim lee", "dev", "c1", null, NOW);
 
     expect(server.sent[0]?.path).toBe(
       "/api/v1/queries?submitter=kim+lee&origin=written&include_ended=true" +

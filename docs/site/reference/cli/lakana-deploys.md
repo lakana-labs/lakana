@@ -24,7 +24,7 @@ List deploy history, newest first, or sorted by --sort and --order.
 | `--repo` | text | none | Only this repository. |
 | `--limit` | whole number, 1 to 200 | none | Most deploys to list (default 100). |
 | `--cursor` | text | none | Continue after the page that printed this cursor. |
-| `--sort` | text | none | What to sort by: created (the default, newest first) or status; deploys of one state come newest first. |
+| `--sort` | text | none | What to sort by: created (the default, newest first), status, kind, repository or who; deploys of one value come newest first. |
 | `--order` | text | none | asc or desc; without it, the direction each --sort field has by default. |
 
 ## `lakana deploys show`

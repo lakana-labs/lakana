@@ -17,6 +17,9 @@ import {
 } from "../../api";
 import type { CursorPage } from "../../api/manage";
 import { PendingButton } from "../../shell/PendingButton";
+import { type ListSortSpec, sortRows } from "../../shell/listSort";
+import { SortHeader } from "../../shell/SortHeader";
+import { useListSort } from "../../shell/useListSort";
 import { markedText, VisibleText } from "../../shell/VisibleText";
 import { problemText } from "../../sign-in/messages";
 import { useWhen } from "../../shell/useWhen";
@@ -60,6 +63,13 @@ type Outcome =
   | { readonly kind: "withdrew"; readonly id: string }
   | { readonly kind: "refused"; readonly sentence: string };
 
+/** The columns the uploads sort by; their own order, the server's, is the newest first. */
+const UPLOAD_SORTS: ListSortSpec<"began" | "expires"> = {
+  fields: { began: "desc", expires: "asc" },
+  natural: { field: "began", order: "desc" },
+  param: "uploads",
+};
+
 /** Properties of {@link UploadsBlock}. */
 export interface UploadsBlockProps {
   /** The artifact. */
@@ -97,7 +107,13 @@ export function UploadsBlock({ place }: UploadsBlockProps): JSX.Element | null {
     (outcome?.kind === "refused" ? refusal : status).current?.focus();
   }, [outcome]);
 
-  const rows = (pages.items ?? []).filter((row) => !removed.has(row.upload_id));
+  const sorting = useListSort(UPLOAD_SORTS);
+  // An artifact holds at most 16 open uploads, all on the first page: they sort in the browser.
+  const rows = sortRows(
+    (pages.items ?? []).filter((row) => !removed.has(row.upload_id)),
+    sorting.sort,
+    { began: (row) => row.created_at, expires: (row) => row.expires_at },
+  );
   const failed = pages.items === undefined && pages.error !== null;
   if (rows.length === 0 && outcome === null && !failed) {
     return null;
@@ -140,9 +156,14 @@ export function UploadsBlock({ place }: UploadsBlockProps): JSX.Element | null {
         region={t("table.artifact.uploads.region", { artifact: dotted })}
         head={
           <tr>
+            {/* An upload's id is a random number, with no order that means something. */}
             <th scope="col">{t("table.artifact.uploads.columns.upload")}</th>
-            <th scope="col">{t("table.artifact.uploads.columns.began")}</th>
-            <th scope="col">{t("table.artifact.uploads.columns.expires")}</th>
+            <SortHeader {...sorting.header("began")}>
+              {t("table.artifact.uploads.columns.began")}
+            </SortHeader>
+            <SortHeader {...sorting.header("expires")}>
+              {t("table.artifact.uploads.columns.expires")}
+            </SortHeader>
             <th scope="col">
               <span className="visually-hidden">{t("table.artifact.uploads.columns.actions")}</span>
             </th>

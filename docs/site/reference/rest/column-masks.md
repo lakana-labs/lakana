@@ -68,7 +68,7 @@ Answer fields: `ColumnMaskOut`
 
 List column masks
 
-Lists the active column masks, newest first. Every filter is optional, and they combine: `principal_name` or `group_name` (not both) for whom a column mask is made to, and `environment`, with `namespace` and then `table`, for where it applies (`namespace` needs `environment`, and `table` needs `namespace`; 422 otherwise). Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header.
+Lists the active column masks, newest first, or in the order `sort` and `order` ask for. Every filter is optional, and they combine: `principal_name` or `group_name` (not both) for whom a column mask is made to, and `environment`, with `namespace` and then `table`, for where it applies (`namespace` needs `environment`, and `table` needs `namespace`; 422 otherwise). Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header. Answers 422 for an unknown `sort` or `order`, or a cursor this list did not issue in this order; send the same sort with every page.
 
 Parameters:
 
@@ -81,6 +81,8 @@ Parameters:
 | `table` | query | no | text or null | Only the column masks on this table. |
 | `limit` | query | no | whole number | Most column masks returned (1 to 200). |
 | `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page; send the same filters. |
+| `sort` | query | no | text or null | What the list is sorted by: `created` (the default), `who`, `on` or `column`. |
+| `order` | query | no | text or null | `asc` or `desc`; by default `desc` for `created`, `asc` for the others. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:

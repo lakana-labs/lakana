@@ -70,7 +70,7 @@ Answer fields: `GrantOut`
 
 List grants
 
-Lists the active grants, newest first. Every filter is optional and narrows the list, except that `principal_name` and `group_name` exclude each other, and so do `role` and `action` (422 when both are given). The object filter matches exactly: `table` with `namespace` and `environment` lists the grants on that table, `namespace` with `environment` those on the namespace, `environment` alone those on the environment. `kind` lists the grants on every object of one kind, in any letter case: `INSTANCE` those on the whole instance, which apply to everything in it; with an object filter it must be that object's kind (422 otherwise). Needs the `ADMIN` role on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header.
+Lists the active grants, newest first, or in the order `sort` and `order` ask for. Every filter is optional and narrows the list, except that `principal_name` and `group_name` exclude each other, and so do `role` and `action` (422 when both are given). The object filter matches exactly: `table` with `namespace` and `environment` lists the grants on that table, `namespace` with `environment` those on the namespace, `environment` alone those on the environment. `kind` lists the grants on every object of one kind, in any letter case: `INSTANCE` those on the whole instance, which apply to everything in it; with an object filter it must be that object's kind (422 otherwise). Needs the `ADMIN` role on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header. Answers 422 for an unknown `sort` or `order`, or a cursor this list did not issue in this order; send the same sort with every page.
 
 Parameters:
 
@@ -86,6 +86,8 @@ Parameters:
 | `kind` | query | no | text or null | Only grants on objects of this kind: `INSTANCE`, `ENVIRONMENT`, `NAMESPACE` or `TABLE`. |
 | `limit` | query | no | whole number | Most grants returned (1 to 200). |
 | `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page; send the same filters. |
+| `sort` | query | no | text or null | What the list is sorted by: `granted` (the default), `who`, `what` or `on`. |
+| `order` | query | no | text or null | `asc` or `desc`; by default `desc` for `granted`, `asc` for the others. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:

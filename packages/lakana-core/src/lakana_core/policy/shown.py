@@ -21,9 +21,16 @@ from sqlalchemy.orm import Session
 from lakana_core.access.managed import guard_change
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import ValidationError
-from lakana_core.identity.named import group_named, principal_named
+from lakana_core.identity.named import group_named, principal_named, subject_place_sorts
 from lakana_core.models import ColumnMask, RowFilter
-from lakana_core.pagination import Page, newest_first
+from lakana_core.pagination import (
+    Page,
+    SortField,
+    SortKey,
+    name_order,
+    newest_or_sorted,
+    parse_sort,
+)
 from lakana_core.policy.columns import ColumnSource
 from lakana_core.policy.field_binding import (
     BOUND_STATES,
@@ -128,6 +135,13 @@ def shown_policies(
 
 _Policy = TypeVar("_Policy", RowFilter, ColumnMask)
 
+ROW_FILTER_SORTS: dict[str, bool] = {"created": True, "who": False, "on": False}
+"""The fields the row filters sort by, each with whether it runs from the largest down by
+default: the newest first; whom and where from A."""
+
+COLUMN_MASK_SORTS: dict[str, bool] = {**ROW_FILTER_SORTS, "column": False}
+"""The fields the column masks sort by: a row filter's, and the masked column from A."""
+
 
 class PolicyShowing(Generic[_Policy]):
     """The methods the row filter and column mask services share, written once."""
@@ -137,6 +151,7 @@ class PolicyShowing(Generic[_Policy]):
     _authz: AuthorizationService
     _model: type[_Policy]
     _list_kind: str
+    _sorts: dict[str, bool]
 
     def list_page(
         self,
@@ -149,6 +164,8 @@ class PolicyShowing(Generic[_Policy]):
         table: str | None = None,
         limit: int = 100,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> Page[_Policy]:
         """List active policies of this kind, newest first, one page at a time.
 
@@ -174,13 +191,20 @@ class PolicyShowing(Generic[_Policy]):
         limit
             Most policies returned.
         cursor
-            The `next_cursor` of the previous page. Send the same filters with every page.
+            The `next_cursor` of the previous page. Send the same filters and sort with every
+            page.
+        sort
+            What the list is sorted by: ``created`` (the default), ``who`` (the principal's or
+            group's name), ``on`` (the environment, then the namespace, then the table) or, for
+            column masks, ``column``; the policies of one value newest first.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
 
         Returns
         -------
         Page
-            The policies by time created, newest first, equal times by id, and the cursor of
-            the next page.
+            The policies by time created, newest first, equal times by id (or in the sort asked
+            for), and the cursor of the next page.
 
         Raises
         ------
@@ -189,12 +213,13 @@ class PolicyShowing(Generic[_Policy]):
             up, so an unknown name is not told apart from a known one.
         ValidationError
             If both `principal_name` and `group_name` are given, `table` without `namespace`,
-            `namespace` without `environment`, `limit` is below 1, or `cursor` is not one this
-            server issued for this list.
+            `namespace` without `environment`, `limit` is below 1, `sort` or `order` is
+            unknown, or `cursor` is not one this server issued for this list in this sort.
         NotFoundError
             If no principal has `principal_name`, or no group has `group_name`.
         """
         self._authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
+        chosen = parse_sort(sort, order, self._sorts, "created")
         if principal_name is not None and group_name is not None:
             raise ValidationError(
                 "Pass at most one of `principal_name` and `group_name`: a policy is made to a "
@@ -220,13 +245,28 @@ class PolicyShowing(Generic[_Policy]):
             query = query.where(model.namespace == namespace)
         if table is not None:
             query = query.where(model.table == table)
-        return newest_first(
+        fields = subject_place_sorts(
+            self._session,
+            newest="created",
+            at=model.created_at,
+            principal_id=model.principal_id,
+            group_id=model.group_id,
+            place=(model.environment, model.namespace, model.table),
+        )
+        if issubclass(model, ColumnMask):
+            fields["column"] = SortField(
+                (SortKey(name_order(self._session, model.column), str), fields["who"].keys[1]),
+                descending=False,
+            )
+        return newest_or_sorted(
             self._session,
             query,
             kind=self._list_kind,
+            sort=chosen,
+            fields=fields,
+            newest="created",
             at=model.created_at,
             row_id=model.id,
-            at_of=lambda row: row.created_at,
             limit=limit,
             cursor=cursor,
         )

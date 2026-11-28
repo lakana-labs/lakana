@@ -191,8 +191,9 @@ def list_jobs(
     sort: Annotated[
         str | None,
         sort_option(
-            "name, status (the last run's), last_run (latest first) or next_run (soonest "
-            "first); a job without one comes last. Without it, by repository, then name"
+            "name, status (the last run's), last_run (latest first), next_run (soonest "
+            "first), repository or environment; a job without one comes last. "
+            "Without it, by repository, then name"
         ),
     ] = None,
     order: ORDER = None,

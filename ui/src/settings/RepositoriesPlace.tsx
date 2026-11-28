@@ -22,6 +22,9 @@ import "./repositoryStrings";
 import { SettingsFrame } from "./SettingsFrame";
 import "./settingsStrings";
 import { useSettingsViewer } from "./viewer";
+import { type ListSortSpec, sortRows } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import { useWholePages } from "./wholePages";
 
 /** Properties of {@link RepositoryList}. */
@@ -31,6 +34,12 @@ interface RepositoryListProps {
   /** The place's heading, focused after Try again. */
   readonly heading: RefObject<HTMLHeadingElement | null>;
 }
+
+/** The columns the repositories sort by, in the browser: the list is read whole. */
+const REPOSITORY_SORT: ListSortSpec<"name" | "url" | "kind" | "credential" | "ref"> = {
+  fields: { name: "asc", url: "asc", kind: "asc", credential: "asc", ref: "asc" },
+  natural: null,
+};
 
 /**
  * The repositories in their own scrolling region, or the sentence that there is none.
@@ -44,6 +53,7 @@ function RepositoryList({ manages, heading }: RepositoryListProps): JSX.Element 
   const { t } = useTranslation();
   const read = useResource(listRepositories);
   const pages = useWholePages(read, heading);
+  const sorting = useListSort(REPOSITORY_SORT);
   const p = "settings.repositoryPages";
   if (read.data?.length === 0) {
     return manages ? (
@@ -57,7 +67,14 @@ function RepositoryList({ manages, heading }: RepositoryListProps): JSX.Element 
       </div>
     );
   }
-  const rows = read.data ?? [];
+  const rows = sortRows(read.data ?? [], sorting.sort, {
+    name: (repo) => repo.name,
+    url: (repo) => repo.url,
+    kind: (repo) => t(`${p}.kinds.${repo.kind}`),
+    credential: (repo) => credentialText(t, repo),
+    // The remote's default sorts last.
+    ref: (repo) => repo.default_ref,
+  });
   return (
     <ViewList
       pages={pages}
@@ -69,11 +86,11 @@ function RepositoryList({ manages, heading }: RepositoryListProps): JSX.Element 
       toolbar={{ count: p }}
       head={
         <tr>
-          <th scope="col">{t("list.name")}</th>
-          <th scope="col">{t(`${p}.url`)}</th>
-          <th scope="col">{t(`${p}.kind`)}</th>
-          <th scope="col">{t(`${p}.credentialHead`)}</th>
-          <th scope="col">{t(`${p}.defaultRef`)}</th>
+          <SortHeader {...sorting.header("name")}>{t("list.name")}</SortHeader>
+          <SortHeader {...sorting.header("url")}>{t(`${p}.url`)}</SortHeader>
+          <SortHeader {...sorting.header("kind")}>{t(`${p}.kind`)}</SortHeader>
+          <SortHeader {...sorting.header("credential")}>{t(`${p}.credentialHead`)}</SortHeader>
+          <SortHeader {...sorting.header("ref")}>{t(`${p}.defaultRef`)}</SortHeader>
           <th scope="col">
             <span className="visually-hidden">{t("list.open")}</span>
           </th>

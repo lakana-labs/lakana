@@ -14,6 +14,9 @@ import type { ModelReferenceOut } from "../../api";
 import { VisibleText } from "../../shell/VisibleText";
 import { splitDotted, tablePath } from "../paths";
 import { TabBody } from "./TabBody";
+import { type ListSortSpec, sortRows } from "../../shell/listSort";
+import { SortHeader } from "../../shell/SortHeader";
+import { useListSort } from "../../shell/useListSort";
 import { useTableData } from "./TableContext";
 
 /** Properties of {@link TableName}. */
@@ -59,6 +62,16 @@ interface PanelProps {
   readonly direction: "outgoing" | "incoming";
 }
 
+/** How the references this table makes sort, in the browser. */
+const OUTGOING_SORT: ListSortSpec<"table" | "reference"> = {
+  fields: { table: "asc", reference: "asc" },
+  natural: null,
+  param: "out",
+};
+
+/** How the references to this table sort, in the browser. */
+const INCOMING_SORT: ListSortSpec<"table" | "reference"> = { ...OUTGOING_SORT, param: "in" };
+
 /**
  * One direction's references as a flat panel.
  *
@@ -74,6 +87,7 @@ function Panel({ heading, rows, hidden, hiddenText, direction }: PanelProps): JS
   const { t } = useTranslation();
   const { ref } = useTableData();
   const outgoing = direction === "outgoing";
+  const sorting = useListSort(outgoing ? OUTGOING_SORT : INCOMING_SORT);
   const note = (row: ModelReferenceOut): ReactNode => {
     if (outgoing && !row.target_exists) {
       return t("table.referencesTab.missing");
@@ -91,17 +105,32 @@ function Panel({ heading, rows, hidden, hiddenText, direction }: PanelProps): JS
         <table className="list list-static">
           <thead>
             <tr>
-              <th scope="col">
-                {outgoing ? t("table.referencesTab.reference") : t("table.referencesTab.table")}
-              </th>
-              <th scope="col">
-                {outgoing ? t("table.referencesTab.note") : t("table.referencesTab.reference")}
-              </th>
-              {!outgoing && <th scope="col">{t("table.referencesTab.note")}</th>}
+              {outgoing ? (
+                <SortHeader {...sorting.header("reference")}>
+                  {t("table.referencesTab.reference")}
+                </SortHeader>
+              ) : (
+                <>
+                  <SortHeader {...sorting.header("table")}>
+                    {t("table.referencesTab.table")}
+                  </SortHeader>
+                  <SortHeader {...sorting.header("reference")}>
+                    {t("table.referencesTab.reference")}
+                  </SortHeader>
+                </>
+              )}
+              {/* A note says what the model declares about one reference: it does not sort. */}
+              <th scope="col">{t("table.referencesTab.note")}</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {sortRows(rows, sorting.sort, {
+              table: (row) => row.table,
+              reference: (row) =>
+                outgoing
+                  ? `${row.column} ${row.target}.${row.target_column}`
+                  : `${row.column} ${row.target_column}`,
+            }).map((row) => (
               <tr key={row.id}>
                 {outgoing ? (
                   <td>

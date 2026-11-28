@@ -8,6 +8,7 @@ import { renderShell } from "../test/render";
 import { ADMIN_SESSION, type FakeRoute } from "../test/server";
 import { signedIn } from "../test/session";
 import { MemoryStorage } from "../test/storage";
+import { columnTexts, sortBy, sortState } from "../test/sorting";
 import { fakeWebAuthn } from "../test/webauthn";
 
 /**
@@ -92,12 +93,43 @@ describe("OwnTokensPanel", () => {
       expect.stringMatching(/^expired /),
     ]);
     expect(
-      within(region)
-        .getAllByRole("button")
+      rows
+        .flatMap((row) => within(row).queryAllByRole("button"))
         .map((button) => button.textContent),
     ).toEqual(["Revoke"]);
     expect(within(region).getByRole("button", { name: "Revoke laptop" })).toBeVisible();
     expect(within(rows[1] as HTMLElement).getAllByText("never")).toHaveLength(2);
+  });
+
+  it("sorts the tokens by each column, never used or never expiring last", async () => {
+    const { user } = renderAccount({
+      "GET /api/v1/principals/kim/tokens": {
+        status: 200,
+        body: [
+          aToken({ key_id: "k2", name: "old", revoked_at: "2026-11-12T09:00:00Z" }),
+          aToken({
+            key_id: "k3",
+            name: "ci",
+            expires_at: "2026-11-11T09:00:00Z",
+            created_at: "2026-11-01T09:00:00Z",
+          }),
+          aToken({ last_used_at: "2026-11-15T09:00:00Z" }),
+        ],
+      },
+    });
+    const region = await screen.findByRole("region", { name: "Your API tokens" });
+
+    await sortBy(user, region, "Name");
+    expect(columnTexts(region)).toEqual(["ci", "laptop", "old"]);
+    await sortBy(user, region, "State");
+    expect(columnTexts(region)).toEqual(["laptop", "old", "ci"]);
+    await sortBy(user, region, "Created");
+    expect(sortState(region, "Created")).toBe("descending");
+    expect(columnTexts(region).at(-1)).toBe("ci");
+    await sortBy(user, region, "Last used");
+    expect(columnTexts(region)[0]).toBe("laptop");
+    await sortBy(user, region, "Expires");
+    expect(columnTexts(region)[0]).toBe("ci");
   });
 
   it("the token's rights are the owner's", async () => {

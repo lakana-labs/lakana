@@ -77,10 +77,12 @@ from lakana_core.pagination import (
     SortField,
     SortKey,
     decode_cursor,
+    elapsed_ms,
     encode_cursor,
     name_order,
     parse_choices,
     parse_sort,
+    sorted_cursor_anchor,
     sorted_page,
 )
 from lakana_core.policy.schema_change import PolicyWarningView, schema_change_for_reader
@@ -148,12 +150,20 @@ _NOT_SERVICE_ACCOUNT_MESSAGE = (
 )
 _RESUMABLE = frozenset({TaskStatus.FAILED, TaskStatus.UPSTREAM_FAILED, TaskStatus.CANCELLED})
 
-RUN_SORTS: dict[str, bool] = {"created": True, "name": False, "status": False}
+RUN_SORTS: dict[str, bool] = {
+    "created": True,
+    "name": False,
+    "status": False,
+    "environment": False,
+    "trigger": False,
+    "duration": True,
+    "tasks": True,
+}
 """The fields the runs lists sort by, each with whether it runs from the largest down by default:
-the newest first, names and states from A."""
+the newest, the longest and the most tasks first, names and states from A."""
 
 
-def _run_sort_field(session: Session, field: str) -> SortField:
+def _run_sort_field(session: Session, field: str, now: datetime) -> SortField:
     """Give the keys of a field of the runs lists.
 
     Parameters
@@ -162,21 +172,37 @@ def _run_sort_field(session: Session, field: str) -> SortField:
         The session the list is read in, for the way its database compares names.
     field
         A key of `RUN_SORTS`.
+    now
+        The instant a run still going is measured up to, the same on every page of one
+        listing.
 
     Returns
     -------
     SortField
         For ``created``, the creation time. For ``name``, the job's name, else the
-        repository's, in any letter case; for ``status``, the stored state; each then the
-        newest first.
+        repository's, in any letter case; for ``status``, the stored state; for
+        ``environment``, its name; for ``trigger``, what started the run (one started with
+        `lakana run`, which has none, last); for ``duration``, from its start to its end or
+        to now (one not started last); for ``tasks``, how many it has; each then the newest
+        first.
     """
     newest = SortKey(Run.created_at, datetime, descending=True)
-    if field == "name":
-        name = name_order(session, func.coalesce(Run.job, Repository.name))
-        return SortField((SortKey(name, str), newest), descending=False)
-    if field == "status":
-        return SortField((SortKey(type_coerce(Run.status, String), str), newest), descending=False)
-    return SortField((SortKey(Run.created_at, datetime),), descending=True)
+    if field == "created":
+        return SortField((SortKey(Run.created_at, datetime),), descending=True)
+    tasks = select(func.count(TaskRun.id)).where(TaskRun.run_id == Run.id).scalar_subquery()
+    key = {
+        "name": SortKey(name_order(session, func.coalesce(Run.job, Repository.name)), str),
+        "status": SortKey(type_coerce(Run.status, String), str),
+        "environment": SortKey(name_order(session, Environment.name), str),
+        "trigger": SortKey(type_coerce(Run.trigger, String), str, nullable=True),
+        "duration": SortKey(
+            elapsed_ms(session, Run.started_at, Run.finished_at, now),
+            int,
+            nullable=True,
+        ),
+        "tasks": SortKey(tasks, int),
+    }[field]
+    return SortField((key, newest), descending=RUN_SORTS[field])
 
 
 class ActiveRunError(ConflictError):
@@ -2440,15 +2466,22 @@ class RunService:
         if since is not None:
             query = query.where(Run.created_at >= since)
         if sort != ("created", True):
+            # A run still going is measured up to the instant of the first page on every page,
+            # so its duration does not grow past the cursor between two pages.
+            moving = sort.field == "duration"
+            now = (sorted_cursor_anchor(kind, cursor) if moving else None) or db_now(self._session)
             sorted_runs = sorted_page(
                 self._session,
-                query.join(Repository, Repository.id == Run.repository_id),
+                query.join(Repository, Repository.id == Run.repository_id).join(
+                    Environment, Environment.id == Run.environment_id
+                ),
                 kind=kind,
                 sort=sort,
-                field=_run_sort_field(self._session, sort.field),
+                field=_run_sort_field(self._session, sort.field, now),
                 row_id=Run.id,
                 limit=limit,
                 cursor=cursor,
+                anchor=now if moving else None,
             )
             return sorted_runs.items, sorted_runs.next_cursor
         position = None if cursor is None else decode_cursor(kind, cursor)

@@ -20,12 +20,16 @@ import {
   type PolicyKind,
 } from "../api/policies";
 import type { CursorPage } from "../api/manage";
+import type { ListSortChoice } from "../api/sorting";
 import type { ColumnMaskOut, RowFilterOut } from "../api/table";
 import { tablePath } from "../catalog/paths";
 import { useCursorPages } from "../catalog/views/useCursorPages";
 import { ViewList } from "../catalog/views/ViewList";
 import { ConfirmDialog } from "../shell/ConfirmDialog";
+import type { ListSortSpec } from "../shell/listSort";
 import { useMe } from "../shell/me";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
 import { policyFilterKey } from "./accessPaths";
@@ -45,17 +49,36 @@ type Policy = RowFilterOut & { readonly column: ColumnMaskOut["column"] | null }
  * @param kind - Which list.
  * @param filter - The filter.
  * @param cursor - The cursor of the page; null for the first.
+ * @param sort - The sort; null for the newest first.
  * @returns The page.
  */
 async function policyPage(
   kind: PolicyKind,
   filter: PolicyFilter,
   cursor: string | null,
+  sort: ListSortChoice | null,
 ): Promise<CursorPage<Policy>> {
-  if (kind === "column-mask") return listColumnMaskPage(filter, cursor);
-  const page = await listRowFilterPage(filter, cursor);
+  if (kind === "column-mask") return listColumnMaskPage(filter, cursor, undefined, sort);
+  const page = await listRowFilterPage(filter, cursor, undefined, sort);
   return { ...page, items: page.items.map((policy) => ({ ...policy, column: null })) };
 }
+
+/** The columns a policy list sorts by, on the server: a mask's column too. */
+type PolicyField = "who" | "on" | "column" | "created";
+
+/** The row filters' sorts; their own order is the newest first. A row filter has no column. */
+const FILTER_SORTS: ListSortSpec<Exclude<PolicyField, "column">> = {
+  fields: { who: "asc", on: "asc", created: "desc" },
+  natural: { field: "created", order: "desc" },
+  param: "filters",
+};
+
+/** The column masks' sorts, apart from the row filters' in the address. */
+const MASK_SORTS: ListSortSpec<PolicyField> = {
+  fields: { ...FILTER_SORTS.fields, column: "asc" },
+  natural: FILTER_SORTS.natural,
+  param: "masks",
+};
 
 /** Properties of {@link PolicyList}. */
 export interface PolicyListProps {
@@ -110,11 +133,15 @@ export function PolicyList({
   const when = useWhen();
   const { admin } = useMe();
   const masks = kind === "column-mask";
+  // The row filters' spec has no column, so `column` is never read from the address for them.
+  const sorting = useListSort(masks ? MASK_SORTS : (FILTER_SORTS as ListSortSpec<PolicyField>));
+  const sort = sorting.choice;
   const load = useCallback(
-    (cursor: string | null) => policyPage(kind, filter, cursor),
-    [kind, filter],
+    (cursor: string | null) => policyPage(kind, filter, cursor, sort),
+    [kind, filter, sort],
   );
-  const pages = useCursorPages(`${kind}\n${policyFilterKey(filter)}`, load);
+  // A new sort reads the first page again; the rows stay until it arrives.
+  const pages = useCursorPages(`${kind}\n${policyFilterKey(filter)}`, load, JSON.stringify(sort));
   const { reload } = pages;
   const [deleting, setDeleting] = useState<Policy | null>(null);
   // After a deletion: "deleted" until the list is read again, "reading" while it is.
@@ -155,11 +182,12 @@ export function PolicyList({
         }}
         head={
           <tr>
-            <th scope="col">{t("policies.who")}</th>
-            <th scope="col">{t("policies.on")}</th>
-            {masks && <th scope="col">{t("policies.column")}</th>}
+            <SortHeader {...sorting.header("who")}>{t("policies.who")}</SortHeader>
+            <SortHeader {...sorting.header("on")}>{t("policies.on")}</SortHeader>
+            {masks && <SortHeader {...sorting.header("column")}>{t("policies.column")}</SortHeader>}
+            {/* An expression is SQL someone wrote, with no order that means something. */}
             <th scope="col">{t("policies.expression")}</th>
-            <th scope="col">{t("policies.created")}</th>
+            <SortHeader {...sorting.header("created")}>{t("policies.created")}</SortHeader>
             <th scope="col">
               <span className="visually-hidden">{t("list.actions")}</span>
             </th>

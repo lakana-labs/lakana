@@ -1382,3 +1382,70 @@ def test_list_page_leaves_out_revoked_masks(session: Session) -> None:
 
     assert made[0].id not in {row.id for row in service.list_page(admin).items}
     assert len(service.list_page(admin).items) == 3
+
+
+def test_masks_sort_by_whom_where_and_column_and_page_without_a_gap(session: Session) -> None:
+    """Every sort of the masks pages one at a time in its order; the row filters share it."""
+    service = ColumnMaskService(session, AllowAllAuthorization(), FakeColumnCatalog())
+    principals = PrincipalService(session, AllowAllAuthorization())
+    admin = _admin()
+    _persist_actor(session, admin)
+    ensure_table(session, "dev", "gold", "customers")
+    ensure_table(session, "dev", "gold", "orders")
+    principals.create_principal(admin, name="alice", type=PrincipalType.SERVICE_ACCOUNT)
+    principals.create_principal(admin, name="Bob", type=PrincipalType.SERVICE_ACCOUNT)
+    GroupService(session, AllowAllAuthorization()).create_group(admin, name="analysts")
+    made = [
+        service.create(
+            admin,
+            environment="dev",
+            namespace="gold",
+            table=table,
+            column=column,
+            expression="NULL",
+            principal=subject.get("principal"),
+            group=subject.get("group"),
+        )
+        for subject, table, column in (
+            ({"principal": "alice"}, "customers", "ssn"),
+            ({"group": "analysts"}, "customers", "email"),
+            ({"principal": "Bob"}, "orders", "c"),
+        )
+    ]
+    for minute, mask in enumerate(made):
+        mask.created_at = datetime(2026, 10, 1, 12, minute, tzinfo=UTC)
+    session.commit()
+    m1, m2, m3 = (mask.id for mask in made)
+
+    def walk(sort: str | None = None, order: str | None = None) -> list[uuid.UUID]:
+        """Read every mask one a page.
+
+        Parameters
+        ----------
+        sort
+            The field.
+        order
+            The direction.
+
+        Returns
+        -------
+        list of uuid.UUID
+            The ids in the order the pages gave them.
+        """
+        seen: list[uuid.UUID] = []
+        cursor: str | None = None
+        while True:
+            page = service.list_page(admin, limit=1, cursor=cursor, sort=sort, order=order)
+            seen.extend(mask.id for mask in page.items)
+            if page.next_cursor is None:
+                return seen
+            cursor = page.next_cursor
+
+    assert walk() == [m3, m2, m1]
+    assert walk(sort="who") == [m1, m2, m3]
+    assert walk(sort="who", order="desc") == [m3, m2, m1]
+    assert walk(sort="on") == [m2, m1, m3]
+    assert walk(sort="column") == [m3, m2, m1]  # c, email, ssn
+    assert walk(sort="created", order="asc") == [m1, m2, m3]
+    with pytest.raises(ValidationError, match="`sort` must be one of: column, created, on, who"):
+        service.list_page(admin, sort="expression")

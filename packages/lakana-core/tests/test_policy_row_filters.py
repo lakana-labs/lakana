@@ -1516,3 +1516,11 @@ def test_list_page_leaves_out_revoked_filters(session: Session) -> None:
 
     assert made[0].id not in {row.id for row in service.list_page(admin).items}
     assert len(service.list_page(admin).items) == 3
+
+
+def test_row_filters_take_no_column_sort(session: Session) -> None:
+    """A row filter has no column: the sort is refused, naming the ones it has."""
+    service = RowFilterService(session, AllowAllAuthorization(), FakeColumnCatalog())
+    with pytest.raises(ValidationError, match="`sort` must be one of: created, on, who; got"):
+        service.list_page(_admin(), sort="column")
+    assert service.list_page(_admin(), sort="on", order="desc").items == []

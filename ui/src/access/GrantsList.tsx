@@ -16,6 +16,9 @@ import { useCursorPages } from "../catalog/views/useCursorPages";
 import { ViewList } from "../catalog/views/ViewList";
 import { Avatar } from "../profile/Avatar";
 import type { ListState } from "../shell/ListToolbar";
+import type { ListSortSpec } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import { ConfirmDialog } from "../shell/ConfirmDialog";
 import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
@@ -25,6 +28,12 @@ import { managedScopeOf } from "./managed";
 import { filterKey, groupPath } from "./accessPaths";
 import { personPath } from "./personPath";
 import { whatWords, whereText } from "./words";
+
+/** The columns the grants sort by, on the server; their own order is the newest first. */
+const GRANT_SORTS: ListSortSpec<"who" | "what" | "on" | "granted"> = {
+  fields: { who: "asc", what: "asc", on: "asc", granted: "desc" },
+  natural: { field: "granted", order: "desc" },
+};
 
 /** Properties of {@link GrantsList}. */
 export interface GrantsListProps {
@@ -128,8 +137,14 @@ export function GrantsList({
 }: GrantsListProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
-  const load = useCallback((cursor: string | null) => listGrants(filter, cursor), [filter]);
-  const pages = useCursorPages(filterKey(filter), load);
+  const sorting = useListSort(GRANT_SORTS);
+  const sort = sorting.choice;
+  const load = useCallback(
+    (cursor: string | null) => listGrants(filter, cursor, sort),
+    [filter, sort],
+  );
+  // A new sort reads the first page again; the rows stay until it arrives.
+  const pages = useCursorPages(filterKey(filter), load, JSON.stringify(sort));
   const { reload } = pages;
   const [removing, setRemoving] = useState<GrantOut | null>(null);
   // After a removal: "removed" until the list is read again, "reading" while it is.
@@ -167,10 +182,10 @@ export function GrantsList({
         onState={onState}
         head={
           <tr>
-            <th scope="col">{t("access.grants.who")}</th>
-            <th scope="col">{t("access.grants.what")}</th>
-            <th scope="col">{t("access.grants.on")}</th>
-            <th scope="col">{t("access.grants.grantedAt")}</th>
+            <SortHeader {...sorting.header("who")}>{t("access.grants.who")}</SortHeader>
+            <SortHeader {...sorting.header("what")}>{t("access.grants.what")}</SortHeader>
+            <SortHeader {...sorting.header("on")}>{t("access.grants.on")}</SortHeader>
+            <SortHeader {...sorting.header("granted")}>{t("access.grants.grantedAt")}</SortHeader>
             <th scope="col">
               <span className="visually-hidden">{t("list.actions")}</span>
             </th>

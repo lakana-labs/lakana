@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -31,7 +32,19 @@ from lakana_core.models import (
     Principal,
     RowFilter,
 )
-from lakana_core.pagination import Page, name_contains, newest_first
+from lakana_core.pagination import (
+    Page,
+    SortField,
+    SortKey,
+    name_contains,
+    name_order,
+    newest_or_sorted,
+    parse_sort,
+)
+
+GROUP_SORTS: dict[str, bool] = {"created": True, "name": False}
+"""The fields the groups list sorts by, each with whether it runs from the largest down by
+default: the newest first, names from A."""
 
 
 class GroupService:
@@ -255,6 +268,8 @@ class GroupService:
         member: str | None = None,
         limit: int = 100,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> Page[Group]:
         """List groups, newest first, one page at a time.
 
@@ -270,14 +285,19 @@ class GroupService:
         limit
             Most groups returned.
         cursor
-            The `next_cursor` of the previous page. Send the same `q` and `member` with every
-            page.
+            The `next_cursor` of the previous page. Send the same `q`, `member` and sort with
+            every page.
+        sort
+            What the list is sorted by: ``created`` (the default) or ``name`` (in any letter
+            case).
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for ``name``.
 
         Returns
         -------
         Page of Group
-            The groups by creation time, newest first, equal times by id, and the cursor of
-            the next page.
+            The groups by creation time, newest first, equal times by id (or in the sort asked
+            for), and the cursor of the next page.
 
         Raises
         ------
@@ -288,10 +308,11 @@ class GroupService:
             If the acting principal does not hold the `ADMIN` role on the instance
             (`MANAGE_GROUP` works only with it).
         ValidationError
-            If `limit` is below 1 or `cursor` is not one this server issued for the groups
-            list.
+            If `limit` is below 1, `sort` or `order` is unknown, or `cursor` is not one this
+            server issued for the groups list in this sort.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GROUP)
+        chosen = parse_sort(sort, order, GROUP_SORTS, "created")
         query = select(Group)
         if q is not None and q.strip():
             query = query.where(name_contains(Group.name, q.strip()))
@@ -300,13 +321,20 @@ class GroupService:
             query = query.join(GroupMembership, GroupMembership.group_id == Group.id).where(
                 GroupMembership.principal_id == principal.id
             )
-        return newest_first(
+        return newest_or_sorted(
             self._session,
             query,
             kind="groups",
+            sort=chosen,
+            fields={
+                "created": SortField((SortKey(Group.created_at, datetime),), descending=True),
+                "name": SortField(
+                    (SortKey(name_order(self._session, Group.name), str),), descending=False
+                ),
+            },
+            newest="created",
             at=Group.created_at,
             row_id=Group.id,
-            at_of=lambda row: row.created_at,
             limit=limit,
             cursor=cursor,
         )

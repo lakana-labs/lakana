@@ -31,7 +31,18 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Generic, NamedTuple, TypeVar
 
-from sqlalchemy import ColumnElement, Select, String, and_, func, literal, or_, true
+from sqlalchemy import (
+    BigInteger,
+    ColumnElement,
+    Select,
+    String,
+    and_,
+    cast,
+    func,
+    literal,
+    or_,
+    true,
+)
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
 from lakana_core.errors import ValidationError
@@ -499,7 +510,11 @@ def _tagged(value: CursorValue) -> list[str | int | None]:
 
 
 def encode_sorted_cursor(
-    kind: str, sort: str, values: Sequence[CursorValue], row_id: uuid.UUID
+    kind: str,
+    sort: str,
+    values: Sequence[CursorValue],
+    row_id: uuid.UUID,
+    anchor: datetime | None = None,
 ) -> str:
     """Encode the position of a page's last item, for a list sorted by chosen keys.
 
@@ -513,13 +528,25 @@ def encode_sorted_cursor(
         The item's sort keys, in order; a time must be timezone-aware.
     row_id
         The item's id.
+    anchor
+        The instant the first page measured a key that changes with the time against (a run
+        still going, measured up to now), so every later page measures it to the same instant;
+        `None` for keys that do not move.
 
     Returns
     -------
     str
-        Unpadded base64url of ``{"k": kind, "s": sort, "v": [[tag, value], …], "i": id}``.
+        Unpadded base64url of ``{"k": kind, "s": sort, "v": [[tag, value], …], "i": id}``, with
+        ``"a"`` the anchor as ISO text when there is one.
     """
-    body = {"k": kind, "s": sort, "v": [_tagged(v) for v in values], "i": str(row_id)}
+    body: dict[str, object] = {
+        "k": kind,
+        "s": sort,
+        "v": [_tagged(v) for v in values],
+        "i": str(row_id),
+    }
+    if anchor is not None:
+        body["a"] = anchor.isoformat()
     # UTF-8 rather than JSON escapes, as `encode_key_cursor`: a non-ASCII name is at most four
     # bytes a character, not twelve, so the cursor stays within `CURSOR_MAX_LENGTH`.
     text = json.dumps(body, ensure_ascii=False)
@@ -706,16 +733,26 @@ def after_sorted(
     return condition
 
 
-LONGEST_KEY_CHARS = 600 + 255
-"""The most characters the text keys of one cursor hold together: a saved query's folded name
-(`NAME_KEY_MAX`, 600) and its environment's name (255). Every other list's keys are shorter: a
-run's job or repository name and a principal's name are 255, a connection's 63."""
+LONGEST_KEY_CHARS = 1024
+"""The most characters the text keys of one cursor hold together: a task token's purpose, which
+falls back to its task's asset (1,024). The others are shorter: a saved query's folded name
+(`NAME_KEY_MAX`, 600) with its environment's name (255), a run's job or repository name and a
+principal's name (255 each), a connection's (63)."""
 
 CURSOR_MAX_LENGTH = 4 * math.ceil((4 * LONGEST_KEY_CHARS + 512) / 3)
 """The longest cursor a list issues: base64 of the keys' text at four UTF-8 bytes a character, and
 512 bytes for the JSON around them (the list's kind, the sort, a time, an id). The routes of the
 lists whose cursors hold names take a `cursor` this long."""
 
+
+PLACE_KEY_CHARS = 255 + NAMESPACE_PATH_MAX + TABLE_NAME_MAX
+"""The most characters the keys of a sort by place hold (`place_keys`): an environment's name,
+a namespace's path and a table's name."""
+
+PLACE_CURSOR_MAX_LENGTH = 4 * math.ceil((4 * PLACE_KEY_CHARS + 512) / 3)
+"""The longest cursor of a list sorted by place (grants, row filters, column masks, the audit
+log): the three names at four UTF-8 bytes a character, and 512 bytes for the rest. The routes of
+these lists take a `cursor` this long."""
 
 _BYTES_A_CHARACTER = 6
 """The most bytes one character of a key's names takes in a key cursor of a list ordered in the
@@ -862,7 +899,7 @@ def parse_sort(
     return ListSort(field, order == "desc")
 
 
-def _key_order(key: SortKey, descending: bool) -> ColumnElement[Any]:
+def key_order(key: SortKey, descending: bool) -> ColumnElement[Any]:
     """Order by one key, a null last.
 
     Parameters
@@ -881,13 +918,13 @@ def _key_order(key: SortKey, descending: bool) -> ColumnElement[Any]:
     return (key.expression.desc() if down else key.expression.asc()).nulls_last()
 
 
-def _after_keys(
+def after_keys(
     keys: Sequence[SortKey],
     row_id: ColumnElement[uuid.UUID] | InstrumentedAttribute[uuid.UUID],
     descending: bool,
     at: SortedPosition,
 ) -> ColumnElement[bool]:
-    """Keep the rows strictly after a position, in the order `_key_order` gives each key.
+    """Keep the rows strictly after a position, in the order `key_order` gives each key.
 
     Parameters
     ----------
@@ -920,6 +957,112 @@ def _after_keys(
     return condition
 
 
+def sorted_cursor_anchor(kind: str, cursor: str | None) -> datetime | None:
+    """Read the instant a sorted list's first page measured against, from a later page's cursor.
+
+    Parameters
+    ----------
+    kind
+        The list being read.
+    cursor
+        The `next_cursor` of the previous page, or `None` for the first page.
+
+    Returns
+    -------
+    datetime or None
+        The anchor in UTC; `None` for the first page and for a cursor without one.
+
+    Raises
+    ------
+    ValidationError
+        If `cursor` is not one this server issued for `kind`, or its anchor is not a time with
+        a zone.
+    """
+    if cursor is None:
+        return None
+    raw = _cursor_body(kind, cursor).get("a")
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise ValidationError(_BAD_CURSOR)
+    try:
+        at = datetime.fromisoformat(raw)
+        if at.tzinfo is None:
+            raise ValidationError(_BAD_CURSOR)
+        return at.astimezone(UTC)
+    except (ValueError, OverflowError) as exc:
+        raise ValidationError(_BAD_CURSOR) from exc
+
+
+def read_sorted_position(
+    kind: str, sort: ListSort, cursor: str, keys: Sequence[SortKey]
+) -> SortedPosition:
+    """Read where the previous page of a list sorted by a chosen field ended.
+
+    Parameters
+    ----------
+    kind
+        The list, as the cursor names it.
+    sort
+        The sort the page is read in.
+    cursor
+        The `next_cursor` of the previous page.
+    keys
+        The field's keys, whose types the cursor holds.
+
+    Returns
+    -------
+    SortedPosition
+        The keys and id of the last row of the previous page.
+
+    Raises
+    ------
+    ValidationError
+        If `cursor` is not one this server issued for this list in this sort; a cursor of the
+        list's default order says so.
+    """
+    if "s" not in _cursor_body(kind, cursor):
+        raise ValidationError(_DEFAULT_NOT_SORTED.format(expected=sort.name))
+    return decode_sorted_cursor(kind, sort.name, cursor, [k.type for k in keys])
+
+
+def keyset_sorted(
+    query: Select[*tuple[Any, ...]],
+    keys: Sequence[SortKey],
+    row_id: ColumnElement[uuid.UUID] | InstrumentedAttribute[uuid.UUID],
+    descending: bool,
+    at: SortedPosition | None,
+) -> Select[*tuple[Any, ...]]:
+    """Order a list by its keys and id, keep the rows after a position, and select the keys.
+
+    Parameters
+    ----------
+    query
+        The rows of the list, filtered.
+    keys
+        The keys, most significant first.
+    row_id
+        The id column, which breaks the last tie.
+    descending
+        The list's direction.
+    at
+        Where the previous page ended; `None` for the first page.
+
+    Returns
+    -------
+    Select
+        The query, with each key and then the id added after its own columns (labelled, so a
+        key never merges with a column the query already selects), ordered, not yet limited.
+    """
+    if at is not None:
+        query = query.where(after_keys(keys, row_id, descending, at))
+    extra = [k.expression.label(f"sort_key_{n}") for n, k in enumerate(keys)]
+    return query.add_columns(*extra, row_id.label("sort_key_id")).order_by(
+        *(key_order(k, descending) for k in keys),
+        row_id.desc() if descending else row_id.asc(),
+    )
+
+
 def sorted_page(
     session: Session,
     query: Select[*tuple[Any, ...]],
@@ -930,6 +1073,7 @@ def sorted_page(
     row_id: ColumnElement[uuid.UUID] | InstrumentedAttribute[uuid.UUID],
     limit: int,
     cursor: str | None,
+    anchor: datetime | None = None,
 ) -> Page[Any]:
     """Read one page of a list sorted by a chosen field, ordered and cut in the database.
 
@@ -955,6 +1099,10 @@ def sorted_page(
         Most rows returned; at least 1.
     cursor
         The `next_cursor` of the previous page, or `None` for the first.
+    anchor
+        The instant a key that moves with the time was measured against (`sorted_cursor_anchor`
+        of `cursor`, or now on the first page), which the next cursor carries on; `None` when
+        no key moves.
 
     Returns
     -------
@@ -972,24 +1120,133 @@ def sorted_page(
         raise ValidationError(f"limit must be at least 1, got {limit}.")
     width = len(query.column_descriptions)
     keys = field.keys
-    if cursor is not None:
-        if "s" not in _cursor_body(kind, cursor):
-            raise ValidationError(_DEFAULT_NOT_SORTED.format(expected=sort.name))
-        at = decode_sorted_cursor(kind, sort.name, cursor, [k.type for k in keys])
-        query = query.where(_after_keys(keys, row_id, sort.descending, at))
-    # Labelled, so a key never merges with a column of an entity the query already selects.
-    extra = [k.expression.label(f"sort_key_{n}") for n, k in enumerate(keys)]
-    ordered = query.add_columns(*extra, row_id.label("sort_key_id")).order_by(
-        *(_key_order(k, sort.descending) for k in keys),
-        row_id.desc() if sort.descending else row_id.asc(),
-    )
+    at = None if cursor is None else read_sorted_position(kind, sort, cursor, keys)
+    ordered = keyset_sorted(query, keys, row_id, sort.descending, at)
     rows = list(session.execute(ordered.limit(limit + 1)).all())
     page = rows[:limit]
     next_cursor = None
     if len(rows) > limit:
         last = page[-1]
-        next_cursor = encode_sorted_cursor(kind, sort.name, last[width:-1], last[-1])
+        next_cursor = encode_sorted_cursor(kind, sort.name, last[width:-1], last[-1], anchor)
     return Page([row[0] if width == 1 else tuple(row[:width]) for row in page], next_cursor)
+
+
+def newest_or_sorted(
+    session: Session,
+    query: Select[Any],
+    *,
+    kind: str,
+    sort: ListSort,
+    fields: Mapping[str, SortField],
+    newest: str,
+    at: InstrumentedAttribute[datetime],
+    row_id: InstrumentedAttribute[uuid.UUID],
+    limit: int,
+    cursor: str | None,
+) -> Page[Any]:
+    """Read one page of a newest-first list, in its own order or in a chosen sort.
+
+    In its own order (`newest`, the newest first) the list keeps the cursor of a time and an id
+    (`newest_first`), so a client of the list before it could be sorted pages as it did; in any
+    other the sorted cursor (`sorted_page`). Each refuses the other's.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    query
+        The rows of the list, already filtered; one entity per row.
+    kind
+        The list, as the cursor names it.
+    sort
+        The sort the page is read in, from `parse_sort`.
+    fields
+        The keys of each field the list sorts by.
+    newest
+        The field of the list's own order, the time `at` newest first.
+    at
+        The time of the list's own order.
+    row_id
+        The id column, which breaks ties.
+    limit
+        Most rows returned; at least 1.
+    cursor
+        The `next_cursor` of the previous page, or `None` for the first.
+
+    Returns
+    -------
+    Page
+        The rows, and the cursor of the next page (`None` on the last).
+    """
+    if sort == (newest, True):
+        return newest_first(
+            session,
+            query,
+            kind=kind,
+            at=at,
+            row_id=row_id,
+            at_of=lambda row: getattr(row, at.key),
+            limit=limit,
+            cursor=cursor,
+        )
+    return sorted_page(
+        session,
+        query,
+        kind=kind,
+        sort=sort,
+        field=fields[sort.field],
+        row_id=row_id,
+        limit=limit,
+        cursor=cursor,
+    )
+
+
+def place_keys(
+    session: Session,
+    *columns: InstrumentedAttribute[str] | InstrumentedAttribute[str | None],
+) -> tuple[SortKey, ...]:
+    """Sort a list by where its rows apply: an environment, a namespace in it, a table in that.
+
+    Parameters
+    ----------
+    session
+        The session the list is read in, for its database's dialect.
+    *columns
+        The row's environment, namespace and table columns, the widest first; a null (a row on
+        the whole instance, or on a whole environment) sorts before every name beneath it.
+
+    Returns
+    -------
+    tuple of SortKey
+        One key a column, each a name in any letter case; a namespace's parts compare one by
+        one, since the separator they are joined with sorts before every letter.
+    """
+    return tuple(
+        SortKey(name_order(session, func.coalesce(column, literal(""))), str) for column in columns
+    )
+
+
+def last_if_missing(value: str | None, descending: bool) -> tuple[str, str]:
+    """Write one part of a key of a list sorted in Python, so a missing value comes last.
+
+    `page_in_order` reverses the whole key of a list that runs from the largest down; this
+    flag reverses with it, so a missing value comes last in either direction.
+
+    Parameters
+    ----------
+    value
+        The value, as text that sorts as the list should; `None` when there is none.
+    descending
+        Whether the list runs from the largest key down.
+
+    Returns
+    -------
+    tuple of str
+        A flag and the value, to be spread into the key.
+    """
+    if value is None:
+        return ("0" if descending else "1", "")
+    return ("1" if descending else "0", value)
 
 
 def name_order(
@@ -1014,6 +1271,39 @@ def name_order(
     if session.get_bind().dialect.name == "postgresql":
         return lowered.collate("C")
     return lowered
+
+
+def elapsed_ms(
+    session: Session,
+    start: InstrumentedAttribute[datetime | None],
+    end: InstrumentedAttribute[datetime | None],
+    now: datetime,
+) -> ColumnElement[int]:
+    """Measure how long something took, in whole milliseconds, for a list sorted by it.
+
+    Parameters
+    ----------
+    session
+        The session the list is read in, for its database's dialect.
+    start
+        When it started; null for one that has not, whose duration is null.
+    end
+        When it ended; null for one still going, measured up to `now`.
+    now
+        The present, as the list's reader sees it.
+
+    Returns
+    -------
+    ColumnElement
+        The milliseconds as a ``BIGINT``: from Postgres's epoch difference, from SQLite's
+        Julian days.
+    """
+    until = func.coalesce(end, literal(now, type_=start.type))
+    if session.get_bind().dialect.name == "postgresql":
+        seconds = func.extract("epoch", until - start)
+    else:
+        seconds = (func.julianday(until) - func.julianday(start)) * 86400.0
+    return cast(func.round(seconds * 1000), BigInteger)
 
 
 def escape_like(value: str) -> str:
@@ -1138,6 +1428,76 @@ def page_in_order(
     if len(keyed) > limit:
         next_cursor = encode_tuple_cursor(kind, page[-1][0])
     return Page([item for _, item in page], next_cursor)
+
+
+def page_sorted_in_python(
+    items: Sequence[_T],
+    *,
+    kind: str,
+    sort: ListSort,
+    default: ListSort,
+    keys: Mapping[str, Callable[[_T, bool], tuple[str, ...]]],
+    limit: int,
+    cursor: str | None,
+) -> Page[_T]:
+    """Page a list sorted in Python by a field of the caller's choice (`page_in_order`).
+
+    In its own order the list keeps its cursor; in any other the cursor names the sort as well
+    as the list, so a cursor of one order is refused by another.
+
+    Parameters
+    ----------
+    items
+        Every item of the list, in any order.
+    kind
+        The list's name in the cursor.
+    sort
+        The sort the page is read in, from `parse_sort`.
+    default
+        The list's own order.
+    keys
+        For each field, an item's key given whether the list runs from the largest down; unique
+        among the items, as `page_in_order` needs.
+    limit
+        The page size, 1 to `LIST_LIMIT_MAX`.
+    cursor
+        The `next_cursor` of the previous page, or `None` for the first.
+
+    Returns
+    -------
+    Page
+        This page's items and, unless it is the last, the cursor that continues it.
+    """
+    key = keys[sort.field]
+    return page_in_order(
+        items,
+        kind=kind if sort == default else f"{kind}:{sort.name}",
+        key_of=lambda item: key(item, sort.descending),
+        limit=limit,
+        cursor=cursor,
+        descending=sort.descending,
+    )
+
+
+def table_name_key(name: str, namespace: str, table_id: uuid.UUID) -> tuple[str, ...]:
+    """Key a table of a list sorted in Python by its name, as the table list sorts names.
+
+    Parameters
+    ----------
+    name
+        The table's name.
+    namespace
+        Its namespace, dotted (a cursor holds no control character, so not the separator
+        the catalog joins the parts with).
+    table_id
+        Its id, which keeps the key unique.
+
+    Returns
+    -------
+    tuple of str
+        The name in any letter case, then the namespace, then the id.
+    """
+    return (name.lower(), namespace.lower(), str(table_id))
 
 
 def check_list_limit(limit: int) -> None:

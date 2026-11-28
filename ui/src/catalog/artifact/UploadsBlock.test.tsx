@@ -1,10 +1,12 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 
 import type { TableRef } from "../../api";
 import { artifactRoutes, upload } from "../../test/artifacts";
 import { fakeServer, type FakeServer } from "../../test/server";
+import { columnTexts, sortBy, sortState } from "../../test/sorting";
 import { UploadsBlock } from "./UploadsBlock";
 
 /**
@@ -37,7 +39,7 @@ const GONE = "This upload has expired or does not exist; start the upload again.
  */
 function renderUploads() {
   const user = userEvent.setup();
-  const { container } = render(<UploadsBlock place={PLACE} />);
+  const { container } = render(<UploadsBlock place={PLACE} />, { wrapper: MemoryRouter });
   return { user, container };
 }
 
@@ -240,5 +242,42 @@ describe("UploadsBlock", () => {
     expect(row).toHaveTextContent("evilU+202Edi");
     expect(row.textContent).not.toContain("‮");
     expect(within(row).getByRole("button", { name: "Withdraw upload evilU+202Edi" })).toBeVisible();
+  });
+});
+
+describe("UploadsBlock's sort", () => {
+  it("sorts by when each began and expires in the browser; the id does not sort", async () => {
+    fakeServer({
+      ...artifactRoutes(),
+      [UPLOADS]: {
+        status: 200,
+        body: {
+          items: [
+            upload(),
+            upload({
+              upload_id: SECOND,
+              created_at: "2026-11-15T09:00:00Z",
+              expires_at: "2099-11-17T10:00:00Z",
+            }),
+          ],
+          next_cursor: null,
+        },
+      },
+    });
+    const { user } = renderUploads();
+    await rows();
+    const region = screen.getByRole("region", { name: "Your open uploads of ml.model" });
+    expect(sortState(region, "Began")).toBe("descending");
+    expect(within(region).queryByRole("button", { name: "Upload" })).toBeNull();
+    const ids = (): (string | null)[] => columnTexts(region);
+    expect(ids()).toEqual([FIRST, SECOND]);
+    await sortBy(user, region, "Expires");
+    expect(ids()).toEqual([FIRST, SECOND]);
+    await sortBy(user, region, "Expires");
+    expect(ids()).toEqual([SECOND, FIRST]);
+    await sortBy(user, region, "Began");
+    expect(ids()).toEqual([FIRST, SECOND]);
+    await sortBy(user, region, "Began");
+    expect(ids()).toEqual([SECOND, FIRST]);
   });
 });

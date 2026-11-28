@@ -14,6 +14,9 @@ import { ViewList } from "../catalog/views/ViewList";
 import { SettingsFrame } from "../settings/SettingsFrame";
 import "../settings/settingsStrings";
 import { countWords, ListToolbar, type ListState, useListState } from "../shell/ListToolbar";
+import type { ListSortSpec } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import { useFocusAfter } from "../shell/useFocusAfter";
 import { VisibleText } from "../shell/VisibleText";
 import "./access.css";
@@ -36,8 +39,12 @@ interface GroupListProps {
   readonly round: number;
 }
 
+/** The column the groups sort by, on the server; their own order, the newest first, is no column. */
+const GROUP_SORTS: ListSortSpec<"name"> = { fields: { name: "asc" }, natural: null };
+
 /**
- * The groups that match the words, a page at a time; each row opens its group.
+ * The groups that match the words, a page at a time, the newest first or by name; each row opens
+ * its group.
  *
  * @param props - The words and the reading round.
  * @param props.words - The words searched for.
@@ -47,11 +54,14 @@ interface GroupListProps {
  */
 function GroupList({ words, round, onState }: GroupListProps): JSX.Element {
   const { t } = useTranslation();
+  const sorting = useListSort(GROUP_SORTS);
+  const sort = sorting.choice;
   const load = useCallback(
-    (cursor: string | null) => listGroups({ words, member: null }, cursor),
-    [words],
+    (cursor: string | null) => listGroups({ words, member: null }, cursor, sort),
+    [words, sort],
   );
-  const pages = useCursorPages(`${words}\n${String(round)}`, load);
+  // A new sort reads the first page again; the rows stay until it arrives.
+  const pages = useCursorPages(`${words}\n${String(round)}`, load, JSON.stringify(sort));
   const rows = pages.items ?? [];
   return (
     <>
@@ -72,7 +82,7 @@ function GroupList({ words, round, onState }: GroupListProps): JSX.Element {
         onState={onState}
         head={
           <tr>
-            <th scope="col">{t("list.name")}</th>
+            <SortHeader {...sorting.header("name")}>{t("list.name")}</SortHeader>
             <th scope="col">
               <span className="visually-hidden">{t("list.open")}</span>
             </th>

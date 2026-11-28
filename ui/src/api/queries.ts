@@ -6,6 +6,7 @@
  */
 import { api } from "./client";
 import { environmentPath, withQuery, type CursorPage } from "./manage";
+import { type ListSortChoice, setSort } from "./sorting";
 import { type QueryRunStatus, type ResultPageOut } from "./table";
 
 /** The largest file the browser downloads; the one definition, which artifacts use too. */
@@ -177,6 +178,7 @@ export function getResultPageAt(
  * @param me - The person's principal name.
  * @param environment - Only this environment; null for all.
  * @param cursor - The cursor of the page, or null for the first.
+ * @param sort - The sort; null for the list's own order (running, queued, then ended).
  * @param now - The time the days count back from.
  * @returns The page.
  * @throws {ApiError} for a refusal.
@@ -185,6 +187,7 @@ export async function listMyQueries(
   me: string,
   environment: string | null,
   cursor: string | null,
+  sort: ListSortChoice | null = null,
   now: Date = new Date(),
 ): Promise<CursorPage<QueryListItemOut>> {
   const query = new URLSearchParams({
@@ -197,6 +200,7 @@ export async function listMyQueries(
   if (environment !== null) {
     query.set("environment", environment);
   }
+  setSort(query, sort);
   if (cursor !== null) {
     query.set("cursor", cursor);
   }

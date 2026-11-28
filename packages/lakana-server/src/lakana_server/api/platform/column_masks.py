@@ -16,7 +16,12 @@ from lakana_core.auth import PrincipalRef
 from lakana_core.models import ColumnMask
 from lakana_core.policy.column_masks import ColumnMaskService
 from lakana_core.policy.shown import ShownPolicy
-from lakana_server.api.platform.listing import set_next_cursor
+from lakana_server.api.platform.listing import (
+    OrderParam,
+    PlaceCursorParam,
+    SortParam,
+    set_next_cursor,
+)
 from lakana_server.api.platform.namespace_forms import dotted_namespace, joined_namespace
 from lakana_server.api.platform.schemas import ColumnMaskCreate, ColumnMaskOut
 from lakana_server.api.platform.subjects import SubjectNames, subject_names
@@ -140,6 +145,9 @@ def create_column_mask(
     )
 
 
+# Each list route declares and documents its own query parameters, which the OpenAPI document and
+# the REST reference are built from; these repeat those of `list_row_filters`, with `column`.
+# jscpd:ignore-start
 @router.get("", response_model=list[ColumnMaskOut], responses=errors(403, 404))
 def list_column_masks(
     response: Response,
@@ -149,19 +157,23 @@ def list_column_masks(
     namespace: str | None = None,
     table: str | None = None,
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: PlaceCursorParam = None,
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     service: ColumnMaskService = Depends(get_column_mask_service),
     session: Session = Depends(get_session),
 ) -> list[ColumnMaskOut]:
     """List column masks.
 
-    Lists the active column masks, newest first. Every filter is optional, and they combine:
-    `principal_name` or `group_name` (not both) for whom a column mask is made to, and
-    `environment`, with `namespace` and then `table`, for where it applies (`namespace` needs
-    `environment`, and `table` needs `namespace`; 422 otherwise). Needs `MANAGE_POLICY` on the
-    instance. Answers 404 when no principal or group has the name given. The cursor of the
-    next page is in the `X-Next-Cursor` response header.
+    Lists the active column masks, newest first, or in the order `sort` and `order` ask for.
+    Every filter is optional, and they combine: `principal_name` or `group_name` (not both) for
+    whom a column mask is made to, and `environment`, with `namespace` and then `table`, for
+    where it applies (`namespace` needs `environment`, and `table` needs `namespace`; 422
+    otherwise). Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group
+    has the name given. The cursor of the next page is in the `X-Next-Cursor` response header.
+    Answers 422 for an unknown `sort` or `order`, or a cursor this list did not issue in this
+    order; send the same sort with every page.
 
     Parameters
     ----------
@@ -181,6 +193,10 @@ def list_column_masks(
         Most column masks returned (1 to 200).
     cursor
         The `X-Next-Cursor` of the previous page; send the same filters.
+    sort
+        What the list is sorted by: `created` (the default), `who`, `on` or `column`.
+    order
+        `asc` or `desc`; by default `desc` for `created`, `asc` for the others.
     principal
         The authenticated caller.
     service
@@ -202,11 +218,14 @@ def list_column_masks(
         table=table,
         limit=limit,
         cursor=cursor,
+        sort=sort,
+        order=order,
     )
     set_next_cursor(response, page.next_cursor)
     shown = service.shown(principal, page.items)
     names = subject_names(session, page.items)
     return [_to_out(row, shown[row.id], names) for row in page.items]
+    # jscpd:ignore-end
 
 
 @router.delete("/{column_mask_id}", status_code=204, responses=errors(403, 404, 409))

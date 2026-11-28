@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { JobOut } from "../api/jobs";
 import { aJob } from "../test/jobs";
 import { type FakeRoute, fakeServer } from "../test/server";
+import { expectServerSorts } from "../test/sorting";
 import { AllJobs } from "./AllJobs";
 
 const when = (iso: string): string =>
@@ -496,6 +497,23 @@ describe("AllJobs", () => {
 });
 
 describe("AllJobs' sort", () => {
+  it("sorts by repository and environment in each read and in the merge; not by schedule", async () => {
+    const { server, user } = renderAll(["dev", "prod"], {
+      [jobsOf("dev")]: { status: 200, body: [aJob({ environment: "dev", repository: "zoo" })] },
+      [jobsOf("prod")]: { status: 200, body: [aJob({ environment: "prod" })] },
+    });
+    await screen.findByRole("region", { name: "Every job listed" });
+    const region = (): HTMLElement => screen.getByRole("region", { name: "Every job listed" });
+    await expectServerSorts(user, region, server.sent, "/api/v1/environments/", [
+      ["Repository", "sort=repository&order=asc"],
+    ]);
+    expect(names()[0]).toBe("nightly_sales analytics Environment prod");
+    await expectServerSorts(user, region, server.sent, "/api/v1/environments/", [
+      ["Environment", "sort=environment&order=asc"],
+    ]);
+    expect(within(region()).queryByRole("button", { name: "Schedule" })).toBeNull();
+  });
+
   it("sorts every environment's jobs by the column pressed, a job without a value last", async () => {
     const { server, user } = renderAll(["dev", "prod"], {
       [jobsOf("dev")]: {

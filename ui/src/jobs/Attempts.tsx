@@ -13,13 +13,47 @@ import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
 import { formatDuration, secondsBetween } from "./format";
 import "./jobStrings";
+import { type ListSortSpec, sortRows } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import { failureCode } from "./status";
 
 /** The outcomes that have words of their own; another shows as the server sent it. */
 const OUTCOMES = ["succeeded", "failed", "timed_out", "lost", "released", "cancelled"];
 
+/** A column of the attempts. */
+type AttemptField =
+  | "attempt"
+  | "worker"
+  | "started"
+  | "duration"
+  | "outcome"
+  | "rows"
+  | "failure"
+  | "memory"
+  | "cpu"
+  | "read";
+
+/** The columns the attempts sort by, in the browser: each its own direction first. */
+const ATTEMPT_SORT: ListSortSpec<AttemptField> = {
+  fields: {
+    attempt: "asc",
+    worker: "asc",
+    started: "desc",
+    duration: "desc",
+    outcome: "asc",
+    rows: "desc",
+    failure: "asc",
+    memory: "desc",
+    cpu: "desc",
+    read: "desc",
+  },
+  natural: null,
+  param: "attempts",
+};
+
 /** The columns, in order, and whether each holds a number. */
-const COLUMNS: readonly (readonly [string, boolean])[] = [
+const COLUMNS: readonly (readonly [AttemptField, boolean])[] = [
   ["attempt", true],
   ["worker", false],
   ["started", false],
@@ -54,6 +88,7 @@ export interface AttemptsProps {
 export function Attempts({ asset, attempts }: AttemptsProps): JSX.Element {
   const { t, i18n } = useTranslation();
   const when = useWhen();
+  const sorting = useListSort(ATTEMPT_SORT);
   if (attempts.length === 0) {
     return <p>{t("jobs.attempts.none")}</p>;
   }
@@ -73,14 +108,33 @@ export function Attempts({ asset, attempts }: AttemptsProps): JSX.Element {
         <thead>
           <tr>
             {COLUMNS.map(([column, number]) => (
-              <th key={column} scope="col" className={number ? "number" : undefined}>
+              <SortHeader
+                key={column}
+                {...sorting.header(column)}
+                className={number ? "number" : undefined}
+              >
                 {t(`jobs.attempts.columns.${column}`)}
-              </th>
+              </SortHeader>
             ))}
           </tr>
         </thead>
         <tbody>
-          {attempts.map((attempt) => (
+          {sortRows(attempts, sorting.sort, {
+            attempt: (attempt) => attempt.attempt,
+            worker: (attempt) => attempt.worker,
+            started: (attempt) => attempt.started_at,
+            duration: (attempt) =>
+              attempt.finished_at === null
+                ? null
+                : secondsBetween(attempt.started_at, attempt.finished_at),
+            // A running attempt has no outcome yet: it sorts last.
+            outcome: (attempt) => attempt.outcome,
+            rows: (attempt) => attempt.rows_written,
+            failure: (attempt) => (attempt.failure === null ? null : attempt.failure.code),
+            memory: (attempt) => attempt.peak_memory_bytes,
+            cpu: (attempt) => attempt.cpu_seconds,
+            read: (attempt) => attempt.bytes_read,
+          }).map((attempt) => (
             // A released claim gives its number back, so two attempts may share it; their
             // starts tell them apart.
             <tr key={`${String(attempt.attempt)} ${attempt.started_at}`}>

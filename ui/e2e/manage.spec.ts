@@ -434,7 +434,11 @@ test.describe("the views' times and links under the pointer", () => {
       [VIEWS[2], ""],
     ] as const) {
       await openView(page, view, extra);
-      const buttons = page.getByRole("region", { name: view[1] }).getByRole("button");
+      // The rows' buttons; a column's header may wrap, as any header does.
+      const buttons = page
+        .getByRole("region", { name: view[1] })
+        .locator("tbody")
+        .getByRole("button");
       await expect(buttons.first()).toBeVisible();
       for (const button of await buttons.all()) {
         // The label's text boxes, by the top of their line: one top is one line.

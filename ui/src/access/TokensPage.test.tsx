@@ -5,6 +5,7 @@ import type { TaskTokenOut, TokenOut } from "../api/tokens";
 import { areasFor } from "../shell/areas";
 import { aMember, anEnvironment } from "../test/access";
 import { renderShell } from "../test/render";
+import { expectServerSorts, sortState } from "../test/sorting";
 import type { FakeRoute } from "../test/server";
 
 const PATH = "/settings/access/tokens";
@@ -510,5 +511,28 @@ describe("TokensPage", () => {
     expect(
       server.sent.filter((request) => request.path.startsWith("/api/v1/task-tokens")).at(-1)?.path,
     ).toContain("environment=dev");
+  });
+});
+
+describe("TokensPage's sorts", () => {
+  it("sorts each list on the server by every column, apart in the address", async () => {
+    const { user, server, router } = renderShell(PATH, { routes: tokenRoutes() });
+    const personal = await screen.findByRole("region", { name: "Live personal tokens" });
+    const task = await screen.findByRole("region", { name: "Live task tokens" });
+    expect(sortState(personal, "Created")).toBe("descending");
+
+    await expectServerSorts(user, personal, server.sent, "/api/v1/tokens", [
+      ["Owner", "sort=owner&order=asc"],
+      ["Name", "sort=name&order=asc"],
+      ["Last used", "sort=last_used&order=desc"],
+      ["Expires", "sort=expires&order=asc"],
+    ]);
+    await expectServerSorts(user, task, server.sent, "/api/v1/task-tokens", [
+      ["Environment", "sort=environment&order=asc"],
+      ["For", "sort=purpose&order=asc"],
+      ["Acts as", "sort=acts_as&order=asc"],
+      ["Expires", "sort=expires&order=asc"],
+    ]);
+    expect(router.state.location.search).toBe("?tokensSort=expires&taskTokensSort=expires");
   });
 });

@@ -11,7 +11,10 @@ import { Link } from "react-router";
 import type { TableRef } from "../../api";
 import { type OrphanOut, listOrphans } from "../../api/manage";
 import "../actions/actionStrings";
+import type { ListSortSpec } from "../../shell/listSort";
 import { PendingButton } from "../../shell/PendingButton";
+import { SortHeader } from "../../shell/SortHeader";
+import { useListSort } from "../../shell/useListSort";
 import { markedName, VisibleText } from "../../shell/VisibleText";
 import { DropDialog } from "../actions/DropDialog";
 import { kindWord, Unknown } from "../cells";
@@ -20,6 +23,13 @@ import { DEFAULT_VIEW } from "../view";
 import { useCursorPages } from "./useCursorPages";
 import { ViewList } from "./ViewList";
 import "./viewStrings";
+
+/** The columns the orphans sort by, on the server; their own order is by repository. */
+const ORPHAN_SORTS: ListSortSpec<"name" | "kind" | "repository"> = {
+  fields: { name: "asc", kind: "asc", repository: "asc" },
+  natural: { field: "repository", order: "asc" },
+  param: "orphans",
+};
 
 /** Properties of {@link OrphansView}. */
 export interface OrphansViewProps {
@@ -45,11 +55,18 @@ export interface OrphansViewProps {
 export function OrphansView({ environment, namespace, onChanged }: OrphansViewProps): JSX.Element {
   const { t } = useTranslation();
   const [hidden, setHidden] = useState(0);
-  const pages = useCursorPages(environment, async (cursor) => {
-    const page = await listOrphans(environment, cursor);
-    setHidden(page.hidden);
-    return page;
-  });
+  const sorting = useListSort(ORPHAN_SORTS);
+  const sort = sorting.choice;
+  // A new sort reads the first page again; the rows stay until it arrives.
+  const pages = useCursorPages(
+    environment,
+    async (cursor) => {
+      const page = await listOrphans(environment, cursor, sort);
+      setHidden(page.hidden);
+      return page;
+    },
+    JSON.stringify(sort),
+  );
   const [dropping, setDropping] = useState<{ row: OrphanOut; ref: TableRef } | null>(null);
   const [dropped, setDropped] = useState<string | null>(null);
   const status = useRef<HTMLParagraphElement>(null);
@@ -86,9 +103,15 @@ export function OrphansView({ environment, namespace, onChanged }: OrphansViewPr
         region={t("catalog.views.orphans.region")}
         head={
           <tr>
-            <th scope="col">{t("catalog.views.orphans.columns.table")}</th>
-            <th scope="col">{t("catalog.views.orphans.columns.kind")}</th>
-            <th scope="col">{t("catalog.views.orphans.columns.repository")}</th>
+            <SortHeader {...sorting.header("name")}>
+              {t("catalog.views.orphans.columns.table")}
+            </SortHeader>
+            <SortHeader {...sorting.header("kind")}>
+              {t("catalog.views.orphans.columns.kind")}
+            </SortHeader>
+            <SortHeader {...sorting.header("repository")}>
+              {t("catalog.views.orphans.columns.repository")}
+            </SortHeader>
             <th scope="col">
               <span className="visually-hidden">{t("catalog.views.dropped.columns.actions")}</span>
             </th>

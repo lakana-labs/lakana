@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { freshSession, STALE_SESSION, STEP_UP_ROUTES } from "../test/access";
 import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
+import { columnTexts, sortBy, sortState } from "../test/sorting";
 import { fakeWebAuthn } from "../test/webauthn";
 
 const OPEN = {
@@ -46,6 +47,29 @@ async function issueFor(user: ReturnType<typeof renderShell>["user"], name: stri
 }
 
 describe("RecoveryLinksPage", () => {
+  it("sorts the open recovery links by name and by expiry", async () => {
+    const { user } = renderShell("/settings/sign-in/recovery-links", {
+      routes: {
+        "GET /api/v1/recovery-links": {
+          status: 200,
+          body: [
+            { ...OPEN, id: "r-1", name: "kim", expires_at: "2026-11-08T11:00:00Z" },
+            { ...OPEN, id: "r-2", name: "ana", expires_at: "2026-11-08T12:00:00Z" },
+          ],
+        },
+      },
+    });
+    const region = await screen.findByRole("region", { name: "Open recovery links" });
+
+    await sortBy(user, region, "Name");
+    expect(columnTexts(region)).toEqual(["ana", "kim"]);
+    await sortBy(user, region, "Name");
+    expect(sortState(region, "Name")).toBe("descending");
+    expect(columnTexts(region)).toEqual(["kim", "ana"]);
+    await sortBy(user, region, "Expires");
+    expect(columnTexts(region)).toEqual(["kim", "ana"]);
+  });
+
   it("keeps names whole in their own region", async () => {
     const long = "k".repeat(300);
     renderShell("/settings/sign-in/recovery-links", {

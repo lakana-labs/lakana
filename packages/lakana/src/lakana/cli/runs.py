@@ -836,8 +836,9 @@ def list_runs(
     sort: Annotated[
         str | None,
         sort_option(
-            "created (the default, newest first), name (the job's, else the repository's) or "
-            "status; runs of one name or state come newest first"
+            "created (the default, newest first), name (the job's, else the repository's), "
+            "status, environment, trigger, duration (longest first) or tasks (most first); "
+            "runs of one value come newest first"
         ),
     ] = None,
     order: ORDER = None,

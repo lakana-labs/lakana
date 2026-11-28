@@ -1519,7 +1519,7 @@ def _job_view(name: str, repository: str = "analytics", **facts: object) -> JobV
     repository
         Its repository.
     **facts
-        `last_run_status`, `last_run_at` or `next_run_at`.
+        `last_run_status`, `last_run_at`, `next_run_at`, `cron`, `timezone` or `environment`.
 
     Returns
     -------
@@ -1618,8 +1618,40 @@ def test_jobs_sort_by_each_field_with_the_unknown_last() -> None:
         ("alpha", "ml"),
     ]
     with pytest.raises(
-        ValidationError, match="`sort` must be one of: last_run, name, next_run, status"
+        ValidationError,
+        match="`sort` must be one of: environment, last_run, name, next_run, repository, status",
     ):
+        sorted_jobs(jobs, "trigger", None)
+
+
+def test_jobs_sort_by_repository_and_environment_and_not_by_schedule() -> None:
+    nightly = _job_view("nightly", "Shop", cron="0 2 * * *", timezone="UTC", environment="prod")
+    hourly = _job_view("hourly", "analytics", cron="0 * * * *", timezone="Europe/Berlin")
+    by_hand = _job_view("backfill", "ml", environment="Dev2")
+    jobs = [nightly, hourly, by_hand]
+
+    def names(sort: str, order: str | None = None) -> list[str]:
+        """Sort the jobs and name them.
+
+        Parameters
+        ----------
+        sort
+            The field.
+        order
+            The direction.
+
+        Returns
+        -------
+        list of str
+            Each job's name, in order.
+        """
+        return [v.name for v in sorted_jobs(jobs, sort, order)]
+
+    assert names("repository") == ["hourly", "backfill", "nightly"]
+    assert names("repository", "desc") == ["nightly", "backfill", "hourly"]
+    assert names("environment") == ["hourly", "backfill", "nightly"]
+    # Cron text has no order that means something: the schedule does not sort.
+    with pytest.raises(ValidationError, match="got 'schedule'"):
         sorted_jobs(jobs, "schedule", None)
 
 

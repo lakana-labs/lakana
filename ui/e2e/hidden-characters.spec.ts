@@ -814,7 +814,7 @@ walk("CI trust, a rule and Explain mark hidden characters", async ({ page }) => 
   await expect(page.getByRole("dialog")).toBeVisible();
   await page
     .getByRole("dialog")
-    .getByRole("button", { name: /Environment$/ })
+    .getByRole("button", { name: /Environment$/, expanded: false })
     .click();
   await expect(page.getByRole("listbox")).toContainText("prodU+202E");
   await expectNoRaw(page, "Add rule's environments");
@@ -822,7 +822,7 @@ walk("CI trust, a rule and Explain mark hidden characters", async ({ page }) => 
   await expect(page.getByRole("listbox")).toBeHidden();
   await page
     .getByRole("dialog")
-    .getByRole("button", { name: /Repository$/ })
+    .getByRole("button", { name: /Repository$/, expanded: false })
     .click();
   await expect(page.getByRole("listbox")).toContainText("dbt-modelsU+202E");
   await expectNoRaw(page, "Add rule's repositories");
@@ -851,9 +851,9 @@ walk("CI trust, a rule and Explain mark hidden characters", async ({ page }) => 
 
   await page.goto("/settings/ci-trust/explain");
   await page.getByRole("textbox", { name: "Claims" }).fill('{"ref": "refs/heads/main"}');
-  await page.getByRole("button", { name: /Environment$/ }).click();
+  await page.getByRole("button", { name: /Environment$/, expanded: false }).click();
   await page.getByRole("option", { name: /^prod/ }).click();
-  await page.getByRole("button", { name: /Repository$/ }).click();
+  await page.getByRole("button", { name: /Repository$/, expanded: false }).click();
   await page.getByRole("option", { name: /^analytics/ }).click();
   await page.getByRole("button", { name: "Explain" }).click();
   await expect(page.getByRole("region", { name: "Verdict" })).toBeVisible();
@@ -1056,7 +1056,7 @@ walk(
     const env = n("prod");
     await visit(page, `/jobs/deploys?environment=${env}`, ["analytics", "admin", "ana.nowak"]);
     await expect(page.getByText(DEPLOY_FAILURE, { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: /Repository/ }).click();
+    await page.getByRole("button", { name: /Repository/, expanded: false }).click();
     await expect(page.getByRole("listbox")).toBeVisible();
     await expectNoRaw(page, "the open Repository menu");
     await page.keyboard.press("Escape");
@@ -1159,7 +1159,7 @@ walk(
     await expect(page.getByRole("dialog")).toBeVisible();
     await page
       .getByRole("dialog")
-      .getByRole("button", { name: /Environment$/ })
+      .getByRole("button", { name: /Environment$/, expanded: false })
       .click();
     await expect(page.getByRole("listbox")).toBeVisible();
     await expectNoRaw(page, "Add filter or mask's environments");
@@ -1236,7 +1236,7 @@ walk("Groups, a group, Grants and What I may do mark hidden characters", async (
   await expect(page.getByRole("dialog")).toBeVisible();
   await page
     .getByRole("dialog")
-    .getByRole("button", { name: /Environment$/ })
+    .getByRole("button", { name: /Environment$/, expanded: false })
     .click();
   await expect(page.getByRole("listbox")).toBeVisible();
   await expectNoRaw(page, "Add grant's environments");

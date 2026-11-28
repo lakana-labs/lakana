@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RunOut } from "../api/jobs";
 import { aJobRun } from "../test/jobs";
 import { type FakeRoute, fakeServer } from "../test/server";
+import { expectServerSorts } from "../test/sorting";
 import { JobRuns } from "./JobRuns";
 
 const RUNS = "GET /api/v1/environments/prod/runs";
@@ -596,5 +597,18 @@ describe("JobRuns' sort", () => {
     expect(screen.getByRole("status", { name: "where" })).toHaveTextContent(
       "?status=failed&sort=status",
     );
+  });
+
+  it("sorts by duration, trigger and tasks on the server", async () => {
+    const run = aJobRun({ id: "r1", tasks: [] });
+    const { server } = renderRuns({ status: 200, body: [run] });
+    const user = userEvent.setup();
+    await screen.findByRole("link", { name: when(run.created_at) });
+    const region = (): HTMLElement => screen.getByRole("region", { name: "Runs of nightly_sales" });
+    await expectServerSorts(user, region, server.sent, "/api/v1/environments/prod/runs", [
+      ["Duration", "sort=duration&order=desc"],
+      ["Trigger", "sort=trigger&order=asc"],
+      ["Tasks", "sort=tasks&order=desc"],
+    ]);
   });
 });

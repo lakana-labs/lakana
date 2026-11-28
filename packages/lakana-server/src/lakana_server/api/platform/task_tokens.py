@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, Response
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.identity.task_tokens import TaskTokenService
-from lakana_server.api.platform.listing import set_next_cursor
+from lakana_server.api.platform.listing import CursorParam, OrderParam, SortParam, set_next_cursor
 from lakana_server.api.platform.schemas import TaskTokenMintIn, TaskTokenMintOut, TaskTokenOut
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
@@ -25,18 +25,22 @@ def list_task_tokens(
     response: Response,
     environment: str | None = Query(default=None, max_length=255),
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     service: TaskTokenService = Depends(get_task_token_service),
 ) -> list[TaskTokenOut]:
     """List the live task tokens.
 
-    Lists the task tokens that are neither revoked nor expired, newest first, each with the
-    principal it signs in as, its environment and asset scope, its dates and, for a token a
-    worker minted for a task, the run, job and asset. The token values are never included.
-    Needs the `ADMIN` role on the instance; a task or CI token is refused. The cursor of the
-    next page is in the `X-Next-Cursor` response header and is absent on the last page. An
-    `environment` no token names gives an empty list, not a 404.
+    Lists the task tokens that are neither revoked nor expired, newest first (or in the order
+    `sort` and `order` ask for), each with the principal it signs in as, its environment and
+    asset scope, its dates and, for a token a worker minted for a task, the run, job and asset.
+    The token values are never included. Needs the `ADMIN` role on the instance; a task or CI
+    token is refused. The cursor of the next page is in the `X-Next-Cursor` response header and
+    is absent on the last page. An `environment` no token names gives an empty list, not a 404.
+    Answers 422 for an unknown `sort` or `order`, or a cursor this list did not issue in this
+    order; send the same sort with every page.
 
     Parameters
     ----------
@@ -48,6 +52,11 @@ def list_task_tokens(
         Most tokens returned (1 to 200).
     cursor
         The `X-Next-Cursor` of the previous page; send the same `environment`.
+    sort
+        What the list is sorted by: `issued` (the default), `environment`, `purpose` (the
+        job, else the asset; one minted by hand last), `acts_as` or `expires`.
+    order
+        `asc` or `desc`; by default `desc` for `issued`, `asc` for the others.
     principal
         The authenticated caller.
     service
@@ -58,7 +67,9 @@ def list_task_tokens(
     list of TaskTokenOut
         The tokens of this page.
     """
-    page = service.list_live(principal, environment=environment, limit=limit, cursor=cursor)
+    page = service.list_live(
+        principal, environment=environment, limit=limit, cursor=cursor, sort=sort, order=order
+    )
     set_next_cursor(response, page.next_cursor)
     return [
         TaskTokenOut(

@@ -6,6 +6,7 @@ import { anEnvironment } from "../test/access";
 import { aDeployment } from "../test/jobs";
 import { held } from "../test/pending";
 import { renderShell } from "../test/render";
+import { columnTexts, sortBy, sortState } from "../test/sorting";
 import { type FakeRoute, whoami, withoutSessionReads } from "../test/server";
 
 const PROD: EnvironmentOut = { ...anEnvironment("prod"), is_protected: true };
@@ -63,6 +64,24 @@ describe("RunAsPanel", () => {
     expect(
       within(analytics).queryByRole("button", { name: /Clear the run-as account/ }),
     ).toBeNull();
+  });
+
+  it("sorts by repository and by run-as account, an unbound one last; the commit does not sort", async () => {
+    const { user } = prodPage({
+      "GET /api/v1/environments/prod/deployments": {
+        status: 200,
+        body: [aDeployment(), aDeployment({ repository: "dbt", run_as: "etl-prod" })],
+      },
+    });
+    const region = await screen.findByRole("region", { name: "Deployments in prod" });
+
+    await sortBy(user, region, "Repository");
+    await sortBy(user, region, "Repository");
+    expect(sortState(region, "Repository")).toBe("descending");
+    expect(columnTexts(region)).toEqual(["dbt", "analytics"]);
+    await sortBy(user, region, "Runs as");
+    expect(columnTexts(region)).toEqual(["dbt", "analytics"]);
+    expect(within(region).queryByRole("button", { name: "Commit" })).toBeNull();
   });
 
   it("says what an unbound deployment does in an unprotected environment", async () => {

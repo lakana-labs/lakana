@@ -1,9 +1,11 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { aListedRun, RUN_ID } from "../test/queries";
 import { fakeServer } from "../test/server";
+import { expectServerSorts, sortState } from "../test/sorting";
 import { RecentList } from "./RecentList";
 
 const RECENT = "GET /api/v1/queries";
@@ -89,5 +91,36 @@ describe("RecentList", () => {
     expect(await screen.findByText("No queries in the last 30 days.")).toBeInTheDocument();
     const asked = new URL(String(server.sent[0]?.path), "http://localhost").searchParams;
     expect(asked.get("environment")).toBe("prod");
+  });
+
+  it("sorts by when and by state on the server; its own order is no column", async () => {
+    const server = fakeServer({
+      [RECENT]: { status: 200, body: { items: [aListedRun()], next_cursor: null } },
+    });
+    renderRecent(null);
+    await screen.findByRole("region", { name: "Recent queries" });
+    const region = (): HTMLElement => screen.getByRole("region", { name: "Recent queries" });
+    expect(sortState(region(), "When")).toBeNull();
+    await expectServerSorts(userEvent.setup(), region, server.sent, "/api/v1/queries", [
+      ["When", "sort=created&order=desc"],
+      ["State", "sort=status&order=asc"],
+    ]);
+  });
+
+  it("shows once a query a later page of a sort repeats", async () => {
+    const moved = aListedRun();
+    const other = aListedRun({ id: "2d3e4f50-6172-4c83-9da4-b5c6d7e8f9a0", status: "QUEUED" });
+    fakeServer({
+      [RECENT]: (request) =>
+        request.path.includes("cursor=c1")
+          ? { status: 200, body: { items: [moved, other], next_cursor: null } }
+          : { status: 200, body: { items: [moved], next_cursor: "c1" } },
+    });
+    renderRecent(null);
+    const region = await screen.findByRole("region", { name: "Recent queries" });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Show more" }));
+    await waitFor(() => {
+      expect(within(region).getAllByRole("row")).toHaveLength(3);
+    });
   });
 });
