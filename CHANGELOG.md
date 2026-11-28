@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.1](https://github.com/lakana-labs/lakana/compare/v0.23.0...v0.23.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* **ui:** keep the focus off the page when Cancelling… goes; read around Firefox's reflection crash ([#870](https://github.com/lakana-labs/lakana/issues/870)) ([3452a1b](https://github.com/lakana-labs/lakana/commit/3452a1b9e85163257b01912310617afbb91b632d))
+
 ## [0.23.0](https://github.com/lakana-labs/lakana/compare/v0.22.0...v0.23.0) (2026-11-28)
 
 
