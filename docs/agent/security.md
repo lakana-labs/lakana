@@ -7208,6 +7208,17 @@ issuer; with one, the server does not start without `LAKANA_OIDC__CLIENT_ID`,
 in; linking, the token window and `lakana login` are the next pull requests of #32. Threat model:
 "OIDC sign-in (#32)".
 
+- **Empty settings and half configurations** (#853). An empty or blank value of any
+  `LAKANA_OIDC__` or `LAKANA_CI_OIDC__` setting counts as not set (`without_empty_values`, a
+  before-validator on `OidcSignInConfig` and `CiOidcConfig`), because Compose passes an empty
+  value for every `${VAR}` line. A half configuration still fails closed at start-up: an issuer
+  without a client id or secret, and a client id or secret without an issuer (empty or unset), stop
+  the server with a message naming the variable, so a lost issuer line cannot quietly turn single
+  sign-on off and let people offboarded only at the provider in with their passkeys
+  (`test_a_client_setting_without_an_issuer_is_refused`,
+  `test_only_an_empty_issuer_or_client_setting_stops_the_server`). Turning sign-in off means
+  leaving the issuer, the client id and the secret all empty or unset. On CI, issuers without an
+  audience stay refused, and an empty algorithm list is the default `RS256`, never "any".
 - **One verification path with CI.** `lakana_core.oidc` holds the ID-token checks and the key cache
   that CI OIDC used (above); `lakana_core.ci_oidc.jwks` and `.verification` are bindings with the
   same names, signatures, codes and messages, and no `test_ci_oidc*` file changed. CI still requires
