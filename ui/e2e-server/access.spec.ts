@@ -236,7 +236,11 @@ test("an administrator creates a service account and deactivates a person, whose
 
   // The person's session ended with the deactivation.
   await leaver.page.reload();
-  await expect(leaver.page.getByText(/Your account is deactivated/)).toBeVisible();
+  await expect(
+    leaver.page.getByText(
+      /Your Lakana account is deactivated, so your session ended and you can no longer sign in\./,
+    ),
+  ).toBeVisible();
   // The browser logs the one refusal, of the taken name; nothing else.
   expect(errors.filter((error) => !error.includes("status of 409"))).toEqual([]);
   expect(errors.filter((error) => error.includes("status of 409"))).toHaveLength(1);
@@ -265,7 +269,11 @@ test("an administrator who deactivates their own account lands on the sign-in pa
   await deactivate.getByRole("button", { name: "Deactivate" }).click();
 
   // The session ended with the account: the sign-in page says why.
-  await expect(page.getByText(/Your account is deactivated/)).toBeVisible();
+  await expect(
+    page.getByText(
+      /Your Lakana account is deactivated, so your session ended and you can no longer sign in\./,
+    ),
+  ).toBeVisible();
   await expect(page).toHaveURL(/\/sign-in/);
   expect(await violations(page), "signed out after deactivating oneself").toEqual([]);
   // The session read after the deactivation answers 401, which the browser logs.
