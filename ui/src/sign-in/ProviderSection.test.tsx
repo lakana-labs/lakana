@@ -100,7 +100,12 @@ describe("ProviderSection", () => {
     expect(
       within(passkeys).getByText("Your passkeys are kept but no longer sign you in."),
     ).toBeInTheDocument();
-    expect(within(passkeys).queryByRole("button")).not.toBeInTheDocument();
+    // Only the list's Name header, which sorts: no Add and no Remove.
+    expect(
+      within(passkeys)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Name"]);
   });
 
   it("the tokens panel shows the window for a linked person only", async () => {
