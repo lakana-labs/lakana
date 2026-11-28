@@ -369,14 +369,34 @@ tr:hover .chevron {
 }
 
 /* A dialog's ×, in its top corner beside the title, which leaves it room (#855). It comes last
-   in the dialog, so Tab reaches the dialog's own fields first. */
+   in the dialog, so Tab reaches the dialog's own fields first. A framed dialog scrolls its body
+   (.dialog-body), not itself, so the × stays in reach however far a tall dialog is scrolled. */
 .dialog-close {
   position: absolute;
   top: var(--space-4);
   right: var(--space-4);
 }
 
-.dialog:has(.dialog-close) h2 {
+.dialog:has(> .dialog-framed) {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.dialog-framed {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.dialog-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-5);
+}
+
+.dialog:has(.dialog-close) h2[slot="title"] {
   margin-right: calc(var(--control-height) + var(--space-2));
 }
 

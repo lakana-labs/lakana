@@ -30,8 +30,9 @@ export function ActionDialog({ onClose, children }: ActionDialogProps): JSX.Elem
   return (
     <ModalOverlay className="palette-overlay" isOpen onOpenChange={onClose}>
       <Modal className="float dialog">
-        <Dialog className="palette-dialog">
-          {children}
+        <Dialog className="palette-dialog dialog-framed">
+          {/* The body scrolls, not the dialog: the × beside it stays in the corner. */}
+          <div className="dialog-body">{children}</div>
           <DialogClose onClose={onClose} />
         </Dialog>
       </Modal>

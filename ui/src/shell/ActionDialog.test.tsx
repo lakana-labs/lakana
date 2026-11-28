@@ -34,6 +34,18 @@ describe("ActionDialog", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("scrolls its content in a body of its own, so the × stays in its corner", () => {
+    renderDialog(vi.fn());
+    const dialog = screen.getByRole("dialog", { name: "Delete gold.station_ranking" });
+
+    const body = dialog.querySelector(".dialog-body");
+    expect(body).toContainElement(
+      screen.getByRole("heading", { name: "Delete gold.station_ranking" }),
+    );
+    expect(body).not.toContainElement(screen.getByRole("button", { name: "Close dialog" }));
+    expect(screen.getByRole("heading")).toHaveAttribute("slot", "title");
+  });
+
   it("reaches the close button by keyboard and presses it with Enter", async () => {
     const onClose = vi.fn();
     const user = renderDialog(onClose);

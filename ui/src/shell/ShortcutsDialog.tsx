@@ -40,24 +40,26 @@ export function ShortcutsDialog({ onClose }: ShortcutsDialogProps): JSX.Element 
   return (
     <ModalOverlay className="palette-overlay" isOpen isDismissable onOpenChange={onClose}>
       <Modal className="float dialog">
-        <Dialog className="palette-dialog">
-          <Heading slot="title" level={2}>
-            {t("shortcuts.title")}
-          </Heading>
-          <dl className="shortcuts">
-            {SHORTCUTS.map((id) => (
-              <div key={id}>
-                <dt>
-                  <kbd>{keys(id)}</kbd>
-                </dt>
-                <dd>{t(`shortcuts.${id}.text`)}</dd>
-              </div>
-            ))}
-          </dl>
-          <div className="step-actions">
-            <Button className="button" onPress={onClose}>
-              {t("shortcuts.close")}
-            </Button>
+        <Dialog className="palette-dialog dialog-framed">
+          <div className="dialog-body">
+            <Heading slot="title" level={2}>
+              {t("shortcuts.title")}
+            </Heading>
+            <dl className="shortcuts">
+              {SHORTCUTS.map((id) => (
+                <div key={id}>
+                  <dt>
+                    <kbd>{keys(id)}</kbd>
+                  </dt>
+                  <dd>{t(`shortcuts.${id}.text`)}</dd>
+                </div>
+              ))}
+            </dl>
+            <div className="step-actions">
+              <Button className="button" onPress={onClose}>
+                {t("shortcuts.close")}
+              </Button>
+            </div>
           </div>
           <DialogClose onClose={onClose} />
         </Dialog>

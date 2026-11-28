@@ -259,6 +259,33 @@ for (const theme of ["light", "dark"] as const) {
       expect(errors).toEqual([]);
     });
 
+    test("a tall Add rule keeps its × in reach on a phone, and the × closes it", async ({
+      page,
+    }) => {
+      await stubCiTrust(page);
+      await stubEnvironments(page);
+      await page.setViewportSize({ width: 390, height: 640 });
+      await page.goto(PLACE);
+      const add = page.getByRole("button", { name: "Add rule" });
+      await add.click();
+      const dialog = page.getByRole("dialog", { name: "Add a CI trust rule" });
+      await expect(dialog).toBeVisible();
+      const body = dialog.locator(".dialog-body");
+      const close = dialog.getByRole("button", { name: "Close dialog" });
+
+      const tall = await body.evaluate((element) => element.scrollHeight > element.clientHeight);
+      expect(tall, "Add rule is taller than a phone's window").toBe(true);
+      await body.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      await expect(dialog.getByRole("button", { name: "Cancel" })).toBeInViewport();
+      await expect(close).toBeInViewport({ ratio: 1 });
+
+      await close.click();
+      await expect(dialog).toBeHidden();
+      await expect(add).toBeFocused();
+    });
+
     test("320 px", async ({ page }) => {
       await stubCiTrust(page);
       await stubEnvironments(page);
