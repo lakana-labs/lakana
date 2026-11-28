@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
 
 import { getLineage, type GraphOut } from "../../api";
+import { DialogClose } from "../../shell/DialogClose";
 import { PendingButton } from "../../shell/PendingButton";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import { useResource } from "../../shell/useResource";
@@ -166,6 +167,7 @@ function Drawn({ up, down, depths }: DrawnProps): JSX.Element {
                         {t("table.lineage.close")}
                       </Button>
                     </div>
+                    <DialogClose onClose={close} />
                   </>
                 )}
               </Dialog>

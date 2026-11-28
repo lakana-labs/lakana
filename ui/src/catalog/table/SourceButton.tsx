@@ -16,6 +16,7 @@ import {
   type TableDefinitionOut,
   type TableRef,
 } from "../../api";
+import { DialogClose } from "../../shell/DialogClose";
 import { useResource } from "../../shell/useResource";
 import { markedText, VisibleText } from "../../shell/VisibleText";
 import "./tableStrings";
@@ -261,18 +262,21 @@ export function SourceButton({
       <Button className={className}>{label}</Button>
       <ModalOverlay className="palette-overlay" isDismissable>
         <Modal className="float dialog source-dialog">
-          <Dialog className="palette-dialog">
+          <Dialog className="palette-dialog dialog-framed">
             {({ close }) => (
               <>
-                <Heading slot="title" level={2}>
-                  {t("table.definedIn.title", { name: markedText(place.name) })}
-                </Heading>
-                <FileBody place={place} />
-                <div className="step-actions">
-                  <Button className="button" onPress={close}>
-                    {t("table.definedIn.close")}
-                  </Button>
+                <div className="dialog-body">
+                  <Heading slot="title" level={2}>
+                    {t("table.definedIn.title", { name: markedText(place.name) })}
+                  </Heading>
+                  <FileBody place={place} />
+                  <div className="step-actions">
+                    <Button className="button" onPress={close}>
+                      {t("table.definedIn.close")}
+                    </Button>
+                  </div>
                 </div>
+                <DialogClose onClose={close} />
               </>
             )}
           </Dialog>

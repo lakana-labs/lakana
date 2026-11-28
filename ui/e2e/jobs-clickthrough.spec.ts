@@ -127,7 +127,8 @@ test.describe("the Jobs screen, checked by clicking through", () => {
     await expect(pause).toContainText(
       "No run starts on schedule until the schedule is resumed. A run that is running finishes.",
     );
-    await expect(pause.getByRole("button")).toHaveText(["Pause schedule", "Cancel"]);
+    await expect(pause.getByRole("button")).toHaveText(["Pause schedule", "Cancel", "×"]);
+    await expect(pause.getByRole("button", { name: "Close dialog" })).toBeVisible();
     await page.keyboard.press("Escape");
 
     await page.goto(`/jobs/${ENV}/runs/${RUNNING_ID}`);
@@ -137,7 +138,7 @@ test.describe("the Jobs screen, checked by clicking through", () => {
     await expect(ask).toContainText(
       "Running tasks stop and waiting tasks do not start. Finished tasks stay done.",
     );
-    await expect(ask.getByRole("button")).toHaveText(["Cancel run", "Cancel"]);
+    await expect(ask.getByRole("button")).toHaveText(["Cancel run", "Cancel", "×"]);
     await ask.getByRole("button", { name: "Cancel run" }).click();
     await expect(page.locator(".jobs-facts-list")).toContainText("Cancelled", { timeout: 10_000 });
     await expect(cancelRun).toHaveCount(0);

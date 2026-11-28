@@ -330,6 +330,30 @@ describe("RebuildDialog", () => {
     expect(await screen.findByText(/queued run/)).toBeInTheDocument();
   });
 
+  it("ignores the × while the rebuild request is open, as Cancel and Escape, then the × goes where Close does", async () => {
+    const pending = held();
+    fakeServer({ ...manageRoutes(), [REBUILD]: pending.route });
+    const { router, onClose, user } = renderRebuild();
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Why it is rebuilt (recorded in the audit log)" }),
+      REASON,
+    );
+    await user.click(await screen.findByRole("button", { name: "Rebuild" }));
+    await user.click(screen.getByRole("button", { name: "Close dialog" }));
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    pending.release({ status: 202, body: REBUILT });
+    expect(await screen.findByText(/queued run/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close dialog" }));
+    await waitFor(() => {
+      expect(router.state.location.pathname + router.state.location.search).toBe(
+        "/catalog?env=prod&ns=gold.sales",
+      );
+    });
+  });
+
   it("Close goes to the catalog place of the table", async () => {
     fakeServer(manageRoutes());
     const { router, onClose, user } = renderRebuild();
