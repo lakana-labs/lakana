@@ -329,6 +329,8 @@ export function GroupPage({ name }: GroupPageProps): JSX.Element {
   const managed = status.data === undefined ? undefined : managedScopeOf(status.data.scopes, null);
   const writable = managed === null;
   const add = (): void => {
+    // A form sent again while the add waits (Enter, a second press) adds nothing more.
+    if (adding.busy) return;
     const who = principal.trim();
     adding.run(async () => {
       try {

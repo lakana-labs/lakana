@@ -178,7 +178,13 @@ the text colour, so only what opens something looks like it does.
 
 **Names are picked, not guessed.** A field that names a person, a service account, a group or a
 table suggests, as you type, the names that exist and that you may see, so a typo shows before you save.
+A click into the empty field (or Arrow Down) lists the first names before you type anything.
 The suggestions are help: what you type is still sent, and the server checks it.
+
+**Every dialog closes from its corner.** A dialog has a × in its top right corner beside its
+title, which does what its Cancel (or Close) does, so a long form never has to be scrolled to its
+foot to leave it. Escape does the same. The × comes last when you move with Tab, after the
+dialog's own fields and buttons.
 
 **Breadcrumbs.** Every detail page shows where it sits above its heading, for example
 Settings › Access › People › test1. Every part but the last is a link. A list or a tab of an area has no

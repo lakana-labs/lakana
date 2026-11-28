@@ -111,7 +111,7 @@ test("an administrator with a passkey deletes a version, then drops the artifact
   // The passkey touch the server asks for is answered by the virtual authenticator.
   await dialog.getByRole("button", { name: "Delete the version" }).click();
   await expect(dialog.getByText(/^Deleted version 2 of ml\.model\. Freed /)).toBeVisible();
-  await dialog.getByRole("button", { name: "Close" }).click();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(dialog).toBeHidden();
 
   await expect(versionRow(page, 2)).toContainText(`by ${name}`);

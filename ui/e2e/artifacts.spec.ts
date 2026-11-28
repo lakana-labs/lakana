@@ -154,7 +154,7 @@ for (const theme of ["light", "dark"] as const) {
         remove.getByText(/^Deleted version 2 of ml\.model\. Freed 1 file/),
       ).toBeVisible();
       expect(await violations(page), "the Delete dialog's summary").toEqual([]);
-      await remove.getByRole("button", { name: "Close" }).click();
+      await remove.getByRole("button", { name: "Close", exact: true }).click();
 
       await page.getByRole("button", { name: /^Withdraw upload / }).click();
       await expect(page.getByText(/^Withdrew upload /)).toBeFocused();
@@ -222,7 +222,7 @@ for (const theme of ["light", "dark"] as const) {
       await expect(confirmButton).not.toHaveAttribute("data-pending");
       await tabTo(page, confirmButton);
       await page.keyboard.press("Enter");
-      const close = dialog.getByRole("button", { name: "Close" });
+      const close = dialog.getByRole("button", { name: "Close", exact: true });
       await expect(dialog.getByText(/^Deleted version 2 of ml\.model\./)).toBeVisible();
       await tabTo(page, close);
       await page.keyboard.press("Enter");
@@ -371,7 +371,7 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.getByText(/^Withdrew upload /)).toBeVisible();
       await page.getByRole("button", { name: "Delete version 2…" }).click();
       await confirm(page.getByRole("button", { name: "Delete the version" }));
-      await page.getByRole("button", { name: "Close" }).click();
+      await page.getByRole("button", { name: "Close", exact: true }).click();
       await dropWithPointer(page);
       await expect(page.getByText(DROPPED, { exact: true })).toBeVisible();
       await page.waitForLoadState("networkidle");
@@ -429,7 +429,7 @@ test.describe("Delete a version with the passkey in real Chromium", () => {
       dialog.getByText(/^Deleted version 2 of ml\.model\. Freed 1 file \(20 B\)\./),
     ).toBeVisible();
     await expect(dialog.getByText(/Lakana's periodic clean-up decides about/)).toBeVisible();
-    await dialog.getByRole("button", { name: "Close" }).click();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
     await expect(page.getByText(/^Deleted .* by admin$/)).toBeVisible();
     expect(sent).toEqual([
       DELETE_CURRENT,

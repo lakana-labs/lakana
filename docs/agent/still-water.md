@@ -91,6 +91,17 @@ copied into both of its schemes in the same change, or `scripts/tests/test_docs_
   as `.jobs-waits`), and the row forwards a plain click to its link (`openFromCell`). Never a
   `title` or a tooltip of your own, and never anything a person must read only there: the same
   sentence is in the object's own page.
+- **Every dialog has a × in its top corner** (`DialogClose`, `ui/src/shell/DialogClose.tsx`;
+  `ActionDialog` adds it): named "Close dialog", it calls the same handler as the dialog's
+  Cancel or Close and Escape (and so whatever that handler asks first), comes last in the Tab
+  order and stands beside the title (`.dialog-close`), whose heading leaves it room. A new modal
+  that does not use `ActionDialog` adds `DialogClose` itself (#855), and to keep the × in reach
+  in a tall dialog it also puts `dialog-framed` on its `Dialog` and its content in a
+  `div.dialog-body`, which scrolls in place of the dialog, as Keyboard shortcuts and Defined in
+  do: the × is opaque and the body's `scroll-padding-top` keeps a focused control clear of it.
+  The tour and the command
+  palette are not dialogs of this kind: the tour ends with its own buttons, the palette is a
+  search field.
 - **Breadcrumbs on every detail page:** pass `trail` to `Page`; never a breadcrumb on an area's
   own list or tab. Alt+Left goes back from any page (the shell's, global as in the browser); it
   does nothing while a dialog, a menu or a popover is shown, from a text field inside it too, and
@@ -105,11 +116,14 @@ copied into both of its schemes in the same change, or `scripts/tests/test_docs_
   its empty, loading, partial, error, offline or stale, and permission-denied states.
 - **A field that names a principal, a group or a table suggests what exists** (`NamePicker`,
   `ui/src/shell/NamePicker.tsx`, a React Aria `ComboBox`): the server filters under the person's
-  own rights, the list marks hidden characters, says while it waits, when nothing matches ("No
-  principal named …") and when it shows only the first matches, and Escape closes it without
-  closing the dialog around it; Enter takes the highlighted suggestion, or with none sends the
-  form as any field does. What is typed may still be sent; the server judges it. A person
-  who may not list those names gets the plain field, which asks nothing.
+  own rights; a click into the field (after the typing pause) or Arrow Down (at once) opens the
+  list for the text as it is, the first names for an empty field; the list marks hidden
+  characters, says while it waits, when nothing matches ("No principal named …") and when it
+  shows only the first matches, and Escape closes it without closing the dialog around it;
+  Enter takes the highlighted suggestion, or with none sends the form as any field does
+  (through its submit button, so a waiting one sends nothing). What is typed may still be sent;
+  the server judges it. A person who may not list those names gets the plain field, which asks
+  nothing.
 - Every string through i18next (`ui/src/i18n/en.json`; the lint rule `lakana/no-literal-text`
   fails on one written in a component); sentence case; the same term everywhere. Numbers in a
   message are passed as numbers, and i18next writes them for the language ("12,400 rows").

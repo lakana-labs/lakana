@@ -11,7 +11,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from collections.abc import Collection, Mapping
+import time
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import cache
@@ -220,13 +221,20 @@ class FakeProvider:
         )
         return code, query["state"]
 
-    def provider(self, settings: OidcSignInConfig | None = None) -> OidcProvider:
+    def provider(
+        self,
+        settings: OidcSignInConfig | None = None,
+        *,
+        clock: Callable[[], float] | None = None,
+    ) -> OidcProvider:
         """Build the server's provider client over this fake.
 
         Parameters
         ----------
         settings
             The sign-in settings; `config()` by default.
+        clock
+            The key cache's monotonic clock; the real one by default.
 
         Returns
         -------
@@ -234,7 +242,7 @@ class FakeProvider:
             The client.
         """
         settings = settings or config()
-        keys = JwksCache(key_source(settings), fetcher=self.fetch)
+        keys = JwksCache(key_source(settings), fetcher=self.fetch, clock=clock or time.monotonic)
         return OidcProvider(settings, keys=keys, poster=self.post)
 
 

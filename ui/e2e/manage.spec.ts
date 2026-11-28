@@ -108,7 +108,7 @@ for (const theme of ["light", "dark"] as const) {
       await maintain.getByRole("button", { name: "Maintain now" }).click();
       await expect(maintain.getByText("Maintenance is queued as query q-77.")).toBeVisible();
       expect(await violations(page), "the queued maintenance").toEqual([]);
-      await maintain.getByRole("button", { name: "Close" }).click();
+      await maintain.getByRole("button", { name: "Close", exact: true }).click();
 
       await chooseAction(page, "Retention…");
       const retention = page.getByRole("dialog", { name: "Retention of gold.sales.fact_sales" });

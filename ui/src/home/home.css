@@ -71,23 +71,6 @@
   flex-basis: 100%;
 }
 
-.home-update-hide {
-  width: var(--control-height);
-  min-height: var(--control-height);
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--color-text-muted);
-  font: inherit;
-  cursor: pointer;
-}
-
-.home-update-hide[data-hovered] {
-  border-color: var(--color-edge);
-  color: var(--color-text);
-}
-
 /* Get started: one row per step, its sentence first and its one way after. */
 .home-steps {
   margin: 0;

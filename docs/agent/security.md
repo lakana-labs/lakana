@@ -7276,7 +7276,14 @@ in; linking, the token window and `lakana login` are the next pull requests of #
   `flow_expired`) and one `SIGN_IN_OIDC_REFUSED` row, written only when `auth_audit_limiter` admits
   the client (`test_refusal_rows_are_rate_limited`); a provider that answers badly (another issuer
   in discovery, a foreign token endpoint, a 302, 500 or 70 KiB answer, a metadata address) is a
-  reason, never a 500 (`test_unreachable_provider_is_a_reason_not_an_error`). Each request to the
+  reason, never a 500 (`test_unreachable_provider_is_a_reason_not_an_error`). A start (sign-in,
+  invite, recovery link, profile link, step-up) does not send the browser to a provider that is
+  down: it asks `JwksCache.current_discovery`, which fetches discovery and keys again once the
+  latest fetch is `REFRESH_INTERVAL_SECONDS` (60 s) old and refuses when that fetch failed, so a
+  start adds at most one fetch per minute and no new destination; the refusal names the provider
+  (an operator setting) and the next step, and is recorded as `provider_unreachable` (#854,
+  `test_start_with_a_provider_that_went_down_says_so_instead_of_sending_the_browser`). Callbacks
+  and token checks keep the stale cache as before. Each request to the
   provider has its own 10 s deadline; a callback with a cold cache makes up to three in a row
   (discovery, keys, token endpoint), so it answers within about 30 s at worst. A success is
   `SIGN_IN_OIDC` with `iss`, `sub`, the session's key id and the peer, and sets

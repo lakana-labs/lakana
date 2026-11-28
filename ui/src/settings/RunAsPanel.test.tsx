@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { EnvironmentOut } from "../api/environments";
@@ -134,6 +134,30 @@ describe("RunAsPanel", () => {
     const puts = withoutSessionReads(server).filter((request) => request.method === "PUT");
     expect(puts.map((request) => request.body)).toEqual([{ principal: "etl-prod" }]);
     expect(server.sent.some((request) => request.path === "/api/v1/sign-in/session")).toBe(true);
+  });
+
+  it("binds once, however often the dialog's form is sent while it waits", async () => {
+    const answer = held();
+    const { server, user } = prodPage({ [`PUT ${RUN_AS}`]: answer.route });
+
+    await user.click(await screen.findByRole("button", { name: "Set run-as for analytics" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Set the run-as account of analytics in prod",
+    });
+    const field = within(dialog).getByRole("combobox", { name: "Service account" });
+    await user.type(field, "etl-prod{Escape}");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(server.sent.filter((request) => request.method === "PUT")).toHaveLength(1);
+    });
+    fireEvent.submit(field.closest("form") as HTMLFormElement);
+    await user.type(field, "{Enter}");
+
+    expect(server.sent.filter((request) => request.method === "PUT")).toHaveLength(1);
+    answer.release({ status: 200, body: aDeployment({ run_as: "etl-prod" }) });
+    expect(
+      await screen.findByText("Runs of analytics in prod now write as etl-prod."),
+    ).toBeInTheDocument();
   });
 
   it("keeps the server's sentence for a name that is no service account", async () => {
