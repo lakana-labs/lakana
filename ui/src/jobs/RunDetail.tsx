@@ -32,6 +32,9 @@ import { Reading } from "./Reading";
 import { CancelRunButton, ResumeRunButton } from "./RunControls";
 import { isActive, runStatusKind } from "./status";
 import { TaskRow } from "./TaskRow";
+import { type ListSortSpec, sortRows } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import { runTitle, runTrail, useRun } from "./useRun";
 
 /**
@@ -61,6 +64,13 @@ interface RunBodyProps {
   readonly controls: ReactNode;
 }
 
+/** The columns a run's tasks sort by, in the browser; without one, the run's own order. */
+const TASK_SORT: ListSortSpec<"state" | "task" | "duration" | "rows" | "attempt"> = {
+  fields: { state: "asc", task: "asc", duration: "desc", rows: "desc", attempt: "desc" },
+  natural: null,
+  param: "tasks",
+};
+
 /**
  * The run's facts, its controls, why it failed when no task did, and its tasks.
  *
@@ -75,6 +85,7 @@ function RunBody({ environment, run, controls }: RunBodyProps): JSX.Element {
   const when = useWhen();
   const active = isActive(run);
   const taskFailed = run.tasks.some((task) => task.status === "failed");
+  const sorting = useListSort(TASK_SORT);
   return (
     <>
       <dl className="jobs-facts-list">
@@ -128,15 +139,18 @@ function RunBody({ environment, run, controls }: RunBodyProps): JSX.Element {
           <table className="list">
             <thead>
               <tr>
-                <th scope="col">{t("jobs.run.columns.state")}</th>
-                <th scope="col">{t("jobs.run.columns.task")}</th>
-                <th scope="col" className="number">
+                <SortHeader {...sorting.header("state")}>{t("jobs.run.columns.state")}</SortHeader>
+                <SortHeader {...sorting.header("task")}>{t("jobs.run.columns.task")}</SortHeader>
+                <SortHeader {...sorting.header("duration")} className="number">
                   {t("jobs.run.columns.duration")}
-                </th>
-                <th scope="col" className="number">
+                </SortHeader>
+                <SortHeader {...sorting.header("rows")} className="number">
                   {t("jobs.run.columns.rows")}
-                </th>
-                <th scope="col">{t("jobs.run.columns.attempt")}</th>
+                </SortHeader>
+                <SortHeader {...sorting.header("attempt")}>
+                  {t("jobs.run.columns.attempt")}
+                </SortHeader>
+                {/* Why a task waits or failed is a sentence, with no order that means something. */}
                 <th scope="col">{t("jobs.run.columns.why")}</th>
                 <th scope="col">
                   <span className="visually-hidden">{t("list.open")}</span>
@@ -144,7 +158,16 @@ function RunBody({ environment, run, controls }: RunBodyProps): JSX.Element {
               </tr>
             </thead>
             <tbody>
-              {run.tasks.map((task) => (
+              {sortRows(run.tasks, sorting.sort, {
+                state: (task) => task.status,
+                task: (task) => task.asset,
+                duration: (task) =>
+                  task.started_at === null || task.finished_at === null
+                    ? null
+                    : secondsBetween(task.started_at, task.finished_at),
+                rows: (task) => task.rows_written,
+                attempt: (task) => task.attempt,
+              }).map((task) => (
                 <TaskRow key={task.asset} environment={environment} run={run} task={task} />
               ))}
             </tbody>

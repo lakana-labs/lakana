@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RunOut } from "../api/jobs";
 import { aFailure, aJobRun, aTask, JOB_RUN_ID } from "../test/jobs";
 import { type FakeRoute, fakeServer } from "../test/server";
+import { sortBy, sortState } from "../test/sorting";
 import { RunDetail } from "./RunDetail";
 
 const RUN = `GET /api/v1/environments/prod/runs/${JOB_RUN_ID}`;
@@ -234,6 +235,30 @@ describe("RunDetail", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("This run has no tasks.")).toBeInTheDocument();
+  });
+
+  it("sorts the tasks by each column but the why, a task's why staying under it", async () => {
+    const user = userEvent.setup();
+    renderRun({ status: 200, body: FAILED });
+    const region = await screen.findByRole("region", { name: "Tasks of the run" });
+    const tasks = (): string[] =>
+      [...region.querySelectorAll("a.row-name")].map((link) => link.textContent);
+    const own = tasks();
+
+    await sortBy(user, region, "Task");
+    // By the names themselves: the marked character sorts after the letters.
+    expect(tasks().slice(0, 2)).toEqual(["gold.margin", "gold.ranking"]);
+    expect(tasks()).toHaveLength(own.length);
+    await sortBy(user, region, "Duration");
+    expect(sortState(region, "Duration")).toBe("descending");
+    expect(tasks()[0]).toBe("gold.U+202Esales");
+    await sortBy(user, region, "Rows");
+    await sortBy(user, region, "Attempt");
+    expect(tasks()[0]).toBe("gold.U+202Esales");
+    expect(row("gold.U+202Esales").nextElementSibling).toHaveClass("jobs-task-why");
+    await sortBy(user, region, "State");
+    expect(sortState(region, "State")).toBe("ascending");
+    expect(within(region).queryByRole("button", { name: "Why" })).toBeNull();
   });
 
   it("does not show the run's message as its why when a task failed", async () => {
