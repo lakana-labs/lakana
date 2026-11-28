@@ -1154,8 +1154,8 @@ describe("New query", () => {
     expect(
       within(dialog)
         .getAllByRole("button")
-        .map((each) => each.textContent),
-    ).toEqual(["Discard changes", "Cancel"]);
+        .map((each) => each.getAttribute("aria-label") ?? each.textContent),
+    ).toEqual(["Discard changes", "Cancel", "Close dialog"]);
     await shell.user.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
     expect(screen.queryByRole("dialog")).toBeNull();
